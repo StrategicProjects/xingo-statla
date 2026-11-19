@@ -11,9 +11,11 @@
 //! The enum is `#[non_exhaustive]`. Task L3.2 has the six variants its
 //! operations can return, with the names of the contract: `Dimension`,
 //! `InvalidArgument`, `NonFinite`, `NotPositiveDefinite`,
-//! `DowndateIndefinite`, `RankDeficient`. The contract's `NoConvergence`,
-//! `Operator`, `Lu` and `Kkt` arrive with the drivers that return them
-//! (L3.3–L3.4); adding a variant to a non-exhaustive enum is not breaking.
+//! `DowndateIndefinite`, `RankDeficient`. Task L3.3 adds `NoConvergence`
+//! ([`crate::svds()`]) and `Operator` (every driver over a
+//! [`crate::LinearOperator`]). The contract's `Lu` and `Kkt` arrive with
+//! shift-invert (L3.4); adding a variant to a non-exhaustive enum is not
+//! breaking.
 //!
 //! ## Conventions
 //! 1. Lengths are checked before indices, indices before values, values
@@ -25,6 +27,8 @@
 //!    bit as it was (invariants H3, Q3).
 
 use core::fmt;
+
+use crate::OperatorError;
 
 /// Everything that can go wrong, for every function of the crate (decision
 /// S10: one error type). No function of the crate panics on bad input;
@@ -80,6 +84,24 @@ pub enum StatlaError {
         /// that could not be deleted).
         column: usize,
     },
+    /// Fewer than `requested` values converged within the restart limit
+    /// (and `allow_partial` of the options is off).
+    NoConvergence {
+        /// `k`.
+        requested: usize,
+        /// How many satisfied the convergence test.
+        converged: usize,
+        /// Restarts performed.
+        restarts: usize,
+    },
+    /// The caller's operator reported an error.
+    Operator(OperatorError),
+}
+
+/// `StatlaError::Operator` (a function, not a public `From` impl: the
+/// contract has none).
+pub(crate) fn op_err(e: OperatorError) -> StatlaError {
+    StatlaError::Operator(e)
 }
 
 impl fmt::Display for StatlaError {
@@ -104,6 +126,15 @@ impl fmt::Display for StatlaError {
             Self::RankDeficient { column } => {
                 write!(f, "rank deficient at column {column}")
             }
+            Self::NoConvergence {
+                requested,
+                converged,
+                restarts,
+            } => write!(
+                f,
+                "no convergence: {converged} of {requested} values after {restarts} restarts"
+            ),
+            Self::Operator(e) => write!(f, "operator error: {}", e.message),
         }
     }
 }
@@ -144,6 +175,22 @@ mod tests {
             StatlaError::InvalidArgument { what: "ld < rows" }
                 .to_string()
                 .contains("ld < rows")
+        );
+        assert!(
+            StatlaError::NoConvergence {
+                requested: 5,
+                converged: 3,
+                restarts: 7
+            }
+            .to_string()
+            .contains("3 of 5")
+        );
+        assert!(
+            op_err(OperatorError {
+                message: "boom".into()
+            })
+            .to_string()
+            .contains("boom")
         );
         assert!(
             StatlaError::NotPositiveDefinite { column: 1 }

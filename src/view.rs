@@ -168,6 +168,11 @@ impl<'a, T: Real> MatRef<'a, T> {
             data: &self.data[start..],
         })
     }
+    /// The underlying slice (crate-internal: the operator loops of Chapter
+    /// 12.0.5 index it with `ld`; (W1) keeps every index in bounds).
+    pub(crate) fn raw(&self) -> &'a [T] {
+        self.data
+    }
     /// An owned copy.
     #[must_use]
     pub fn to_block(&self) -> DenseBlock<T> {
@@ -224,6 +229,16 @@ impl<'a, T: Real> MatMut<'a, T> {
             ld: self.ld,
             data: self.data,
         }
+    }
+    /// Number of rows.
+    #[must_use]
+    pub(crate) fn rows(&self) -> usize {
+        self.rows
+    }
+    /// Number of columns.
+    #[must_use]
+    pub(crate) fn cols(&self) -> usize {
+        self.cols
     }
     /// Column `j`, mutable; `None` out of range.
     pub fn col_mut(&mut self, j: usize) -> Option<&mut [T]> {

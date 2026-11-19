@@ -18,6 +18,8 @@
     clippy::cast_possible_truncation
 )]
 
+pub mod svd;
+
 use xingo_extprec::DoubleDouble as Dd;
 use xingo_statla::{CholOptions, Cholesky, DenseBlock, MatRef, Qr, QrOptions, Real};
 

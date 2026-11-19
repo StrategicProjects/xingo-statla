@@ -1,22 +1,24 @@
 //! # Chapter 12 — `xingo-statla`: updatable and matrix-free linear algebra for statistics
 //!
-//! **Status (task L3.2 of PLAN.md trilha L3; contract D-0127, approved by
-//! André on 2026-11-19).** This edition implements the *updatable
+//! **Status (tasks L3.2 and L3.3 of PLAN.md trilha L3; contract D-0127,
+//! approved by André on 2026-11-19).** L3.2 implemented the *updatable
 //! factorizations*: the dense views [`MatRef`]/[`MatMut`], the error type
 //! [`StatlaError`] (Chapter 12.0), [`Cholesky`] with rank-1 update and
 //! transactional downdate (Chapter 12.2) and the thin [`Qr`] with explicit
-//! `Q` and five updating operations (Chapter 12.3). **To come**, with the
-//! names and signatures of the approved contract (`contracts/xingo-statla`):
-//! L3.3 — the reproducible generator (Chapter 12.1), `rsvd` and
-//! `range_finder` (12.4), `svds` by Golub–Kahan–Lanczos bidiagonalization
-//! (12.5) and the operator traits `LinearOperator`/`AdjointOperator`; L3.4
-//! — `eigsh`, `eigs`, shift-invert (12.6). Nothing of those exists yet in
-//! this crate (no stubs). (The chapter number 12 is provisional: 1–8, 10
-//! and 11 are taken.)
+//! `Q` and five updating operations (Chapter 12.3). L3.3 adds the
+//! *matrix-free* part: the operator traits [`LinearOperator`]/
+//! [`AdjointOperator`] (Chapter 12.0.5), the reproducible generator
+//! (Chapter 12.1, [`Sketch`]), [`rsvd()`] and [`range_finder`] (12.4), and
+//! [`svds()`] by Golub–Kahan–Lanczos bidiagonalization with thick restart
+//! (12.5), on the shared Krylov machinery (12.0.6–12.0.7). **To come**
+//! (L3.4), with the names and signatures of the approved contract
+//! (`contracts/xingo-statla`): `eigsh`, `eigs`, shift-invert (12.6); nothing
+//! of those exists yet (no stubs). (The chapter number 12 is provisional:
+//! 1–8, 10 and 11 are taken.)
 //!
 //! ## Purpose
 //! Statistical computing keeps asking questions that a dense library
-//! answers only by starting from scratch. The two this edition answers:
+//! answers only by starting from scratch. The three this edition answers:
 //!
 //! 1. *A row arrived (or left); what is the new least-squares fit?* — a QR
 //!    factorization **updated** in `O(mn)` instead of refactorized in
@@ -26,6 +28,12 @@
 //!    new Cholesky factor?* — a rank-1 **update/downdate** in `O(n²)`
 //!    (Kalman/RLS filters, Gaussian-process and mixed-model refits, the
 //!    Q-less QR, which *is* the Cholesky factor of `AᵀA`): [`Cholesky`].
+//!
+//! 3. *What are the leading `k` singular triplets of a matrix I can only
+//!    multiply by?* — the **randomized** SVD of Halko, Martinsson & Tropp,
+//!    with a stated expected error ([`rsvd()`]), and a deterministic truncated
+//!    SVD by Golub–Kahan–Lanczos bidiagonalization accurate to `ε σ_1` on
+//!    every singular value ([`svds()`]).
 //!
 //! The crate does not depend on the solver; the R and Python packages will
 //! reach it through `xingo-ffi` (L4).
@@ -44,9 +52,15 @@
 //! | chapter | module | content |
 //! |---|---|---|
 //! | 12 | this page | overview, invariants, decisions |
-//! | 12.0 | `error`, `view`, `real`, `small` (private) | errors, views, comparisons, Givens rotations, Householder reflectors, DGKS Gram–Schmidt |
+//! | 12.0 | `error`, `view`, `real`, `small` (private) | errors, views, comparisons, Givens rotations, Householder reflectors and QR, DGKS Gram–Schmidt |
+//! | 12.0.5 | `operator` | [`LinearOperator`], [`AdjointOperator`], [`OperatorError`], closures ([`from_fn`], [`from_fns`]) |
+//! | 12.0.6 | `jacobi` (private) | one-sided Jacobi SVD of a small matrix |
+//! | 12.0.7 | `krylov` (private) | expansion with DGKS and breakdown, restart dimension |
+//! | 12.1 | `random` | Algorithm G (xoshiro256++, polar method, own `ln`), [`Sketch`] |
 //! | 12.2 | `cholesky` | [`Cholesky`], [`CholOptions`], [`DowndateInfo`] |
 //! | 12.3 | `qr` | [`Qr`], [`QrOptions`] |
+//! | 12.4 | `rsvd` | [`rsvd()`], [`range_finder`], [`RsvdOptions`], [`Svd`], [`SvdStats`] |
+//! | 12.5 | `svds` | [`svds()`], [`SvdsOptions`], [`SvdWhich`] |
 //!
 //! ## What is reused from `xingo-sparse`, and why (D-0080 layering)
 //! | need | taken from `xingo-sparse` | new here |
@@ -111,21 +125,32 @@
 //! (Q3) As (H3): a failed operation leaves `Q` and `R` bit for bit as they
 //!      were.
 //!
+//! (R1)–(R2), (G1)–(G5): [`rsvd()`] and [`svds()`], Chapters 12.4 and 12.5
+//!      (`c_G = 8`, measured).
+//!
 //! The constants `c_H`, `c_Q` come from the measurements of the example
 //! `accuracy` with a margin, and live in the tests and in the argument of
 //! [`Qr::check_invariants`], not as literals in kernels.
 //!
 //! ## Decisions of the review (André, 2026-11-19; D-0127)
 //! * **S1** — generic `T: Real`, with own small dense routines (internal).
+//! * **S2** — [`svds()`] is Golub–Kahan–Lanczos bidiagonalization with thick
+//!   restart, its own engine, full two-sided reorthogonalization.
 //! * **S3** — `MatRef`/`MatMut` live here.
+//! * **S4** — own xoshiro256++, Marsaglia polar method, own `ln` (12.1).
+//! * **S5** — `apply(&mut self, …) -> Result`; separate [`AdjointOperator`].
+//! * **S6** — names `svds`, `rsvd`, `range_finder` (and `eigs`, `eigsh` in
+//!   L3.4).
 //! * **S8** — thin QR with five operations; Cholesky update/downdate;
 //!   Cholesky insert/delete of a variable in v0.2.
 //! * **S9** — acceptance criteria rewritten on the pilot's numbers (each
 //!   chapter states its own).
-//! * **S10** — one `#[non_exhaustive]` [`StatlaError`]; options with public
-//!   fields and `Default`.
+//! * **S10** — one `#[non_exhaustive]` [`StatlaError`]; [`Sketch`] and
+//!   [`SvdWhich`] `#[non_exhaustive]`; options with public fields and
+//!   `Default`; non-convergence is `Err(NoConvergence)` unless
+//!   `allow_partial`.
 //!
-//! (S2 and S4–S7 concern L3.3–L3.4.)
+//! (S7 concerns L3.4.)
 //!
 //! ## References
 //! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §5.1 (Givens,
@@ -140,20 +165,40 @@
 //! QR factorization", Math. Comp. 30 (1976). Hammarling & Lucas, "Updating
 //! the QR factorization and the least squares problem", MIMS EPrint
 //! 2008.111 (2008). Higham, *Accuracy and Stability of Numerical
-//! Algorithms*, 2nd ed. (2002), ch. 10 and 19. **All cited from memory**;
-//! no source was reopened in task L3.2.
+//! Algorithms*, 2nd ed. (2002), ch. 10 and 19. Halko, Martinsson & Tropp,
+//! "Finding structure with randomness", SIAM Review 53 (2011). Golub &
+//! Kahan, SIAM J. Numer. Anal. 2 (1965). Baglama & Reichel, "Augmented
+//! implicitly restarted Lanczos bidiagonalization methods", SISC 27
+//! (2005). Hestenes, J. SIAM 6 (1958); Demmel & Veselić, SIMAX 13 (1992).
+//! Blackman & Vigna, ACM TOMS 47 (2021). Marsaglia & Bray, SIAM Review 6
+//! (1964). **All cited from memory**; no source was reopened in tasks L3.2
+//! and L3.3 (the xoshiro256++ reference outputs were read in the tests of
+//! `rand` 0.9.4).
 
 #![forbid(unsafe_code)]
 
 mod cholesky;
 mod error;
+mod jacobi;
+mod krylov;
+mod operator;
 mod qr;
+mod random;
 mod real;
+mod rsvd;
 mod small;
+mod svds;
 mod view;
 
 pub use cholesky::{CholOptions, Cholesky, DowndateInfo};
 pub use error::StatlaError;
+pub use operator::{
+    AdjointOperator, FnAdjointOperator, FnOperator, LinearOperator, OperatorError, from_fn,
+    from_fns,
+};
 pub use qr::{Qr, QrOptions};
+pub use random::Sketch;
+pub use rsvd::{RsvdOptions, Svd, SvdStats, range_finder, rsvd};
+pub use svds::{SvdWhich, SvdsOptions, svds};
 pub use view::{MatMut, MatRef};
 pub use xingo_sparse::{DenseBlock, DenseKernel, NaiveDense, Real};

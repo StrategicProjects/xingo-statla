@@ -51,6 +51,14 @@
 //!     rank test).
 //! D4. Return `ν = ‖x‖` and the number of passes.
 //!
+//! ## Algorithm Q (thin Householder QR with explicit `Q`, any rank)
+//! Given `A ∈ T^{m×l}`, `m ≥ l`: the reflectors of F2 in Chapter 12.3
+//! (Algorithm H column by column), `Q ← H_0 ⋯ H_{l−1} [I_l; 0]` applied
+//! backwards, and the signs flipped so that `r_kk ≥ 0`. Unlike
+//! [`crate::Qr::factor`] there is **no rank test**: a rank-deficient `A`
+//! still gives an orthonormal `Q` (the range finder of Chapter 12.4 must
+//! accept a sketch `AΩ` of a low-rank `A`).
+//!
 //! ## Invariants
 //! (S1) Algorithm G returns `r ≥ 0` and `|c|, |s| ≤ 1`; for finite input
 //!      the output is finite (debug-asserted).
@@ -298,6 +306,81 @@ pub(crate) fn orthogonalize<T: Real>(
     (nu, passes)
 }
 
+/// Algorithm Q: `(Q, R)` of the `m × l` block `a` (`m ≥ l`), `r_kk ≥ 0`.
+pub(crate) fn householder_qr<T: Real>(mut w: DenseBlock<T>) -> (DenseBlock<T>, DenseBlock<T>) {
+    let (m, l) = (w.rows, w.cols);
+    debug_assert!(m >= l, "Algorithm Q needs m >= l");
+    let mut taus = vec![T::ZERO; l];
+    for k in 0..l {
+        let (left, right) = w.data.split_at_mut((k + 1) * m);
+        let x = &mut left[k * m + k..];
+        taus[k] = householder(x);
+        let v = &x[1..];
+        for j in 0..l - k - 1 {
+            apply_householder(taus[k], v, &mut right[j * m + k..(j + 1) * m]);
+        }
+    }
+    let mut r = DenseBlock::zeros(l, l);
+    for j in 0..l {
+        for i in 0..=j {
+            r.data[i + j * l] = w.data[i + j * m];
+        }
+    }
+    let mut q = DenseBlock::zeros(m, l);
+    for k in 0..l {
+        q.data[k + k * m] = T::ONE;
+    }
+    for k in (0..l).rev() {
+        let v = &w.data[k * m + k + 1..(k + 1) * m];
+        for j in k..l {
+            apply_householder(taus[k], v, &mut q.data[j * m + k..(j + 1) * m]);
+        }
+    }
+    for k in 0..l {
+        if lt(r.data[k + k * l], T::ZERO) {
+            for j in k..l {
+                r.data[k + j * l] = -r.data[k + j * l];
+            }
+            for v in &mut q.data[k * m..(k + 1) * m] {
+                *v = -*v;
+            }
+        }
+    }
+    (q, r)
+}
+
+/// Algorithm D on the first `ncols` columns of the column-major array
+/// `data` (`rows` rows each) — the growing Krylov bases of Chapter 12.5
+/// live in preallocated blocks. The coefficients are discarded. Returns
+/// `(‖x‖, passes)`.
+pub(crate) fn orthogonalize_against<T: Real>(
+    data: &[T],
+    rows: usize,
+    ncols: usize,
+    x: &mut [T],
+    eta: T,
+) -> (T, u8) {
+    debug_assert_eq!(rows, x.len());
+    let nu0 = norm2(x);
+    let mut s = vec![T::ZERO; ncols];
+    let mut pass = |x: &mut [T]| {
+        for (j, sj) in s.iter_mut().enumerate() {
+            *sj = dot(&data[j * rows..(j + 1) * rows], x);
+        }
+        for (j, &sj) in s.iter().enumerate() {
+            axpy_sub(sj, &data[j * rows..(j + 1) * rows], x);
+        }
+        norm2(x)
+    };
+    let mut nu = pass(x);
+    let mut passes = 1;
+    if lt(nu, eta * nu0) {
+        nu = pass(x);
+        passes = 2;
+    }
+    (nu, passes)
+}
+
 #[cfg(test)]
 #[allow(clippy::float_cmp)] // the tests compare exact values
 mod tests {
@@ -379,5 +462,36 @@ mod tests {
             })
         );
         assert!(check_len("x", 2, 3).is_err() && check_len("x", 2, 2).is_ok());
+        // The slice form gives the same vector.
+        let mut y = [1.0, 1.0, 1e-9];
+        let (nu2, p2) =
+            orthogonalize_against(&q.data, 3, 2, &mut y, std::f64::consts::FRAC_1_SQRT_2);
+        assert_eq!((nu2, p2, y), (1e-9, 2, [0.0, 0.0, 1e-9]));
+    }
+
+    #[test]
+    fn householder_qr_accepts_rank_deficiency() {
+        // Columns 0 and 2 equal: rank 2 of 3.
+        let a = DenseBlock {
+            rows: 4,
+            cols: 3,
+            data: vec![1.0, 2.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 2.0, 0.0, 1.0],
+        };
+        let (q, r) = householder_qr(a.clone());
+        for i in 0..3 {
+            for j in 0..3 {
+                let d = dot(&q.data[i * 4..i * 4 + 4], &q.data[j * 4..j * 4 + 4]);
+                let e = if i == j { 1.0 } else { 0.0 };
+                assert!((d - e).abs() < 1e-15);
+            }
+            assert!(r.get(i, i) >= 0.0);
+        }
+        for j in 0..3 {
+            for i in 0..4 {
+                let qr: f64 = (0..3).map(|k| q.get(i, k) * r.get(k, j)).sum();
+                assert!((qr - a.get(i, j)).abs() < 1e-15);
+            }
+        }
+        assert!(r.get(2, 2) < 1e-15);
     }
 }
