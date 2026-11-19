@@ -360,22 +360,41 @@ pub(crate) fn orthogonalize_against<T: Real>(
     x: &mut [T],
     eta: T,
 ) -> (T, u8) {
+    orthogonalize_prefix(data, rows, ncols, x, eta, None)
+}
+
+/// Algorithm D as [`orthogonalize_against`], accumulating the coefficients
+/// of both passes into `h` (length `≥ ncols`) when given — the Arnoldi
+/// column of Chapter 12.6. The arithmetic on `x` is the same either way.
+pub(crate) fn orthogonalize_prefix<T: Real>(
+    data: &[T],
+    rows: usize,
+    ncols: usize,
+    x: &mut [T],
+    eta: T,
+    mut h: Option<&mut [T]>,
+) -> (T, u8) {
     debug_assert_eq!(rows, x.len());
     let nu0 = norm2(x);
     let mut s = vec![T::ZERO; ncols];
-    let mut pass = |x: &mut [T]| {
+    let mut pass = |x: &mut [T], h: &mut Option<&mut [T]>| {
         for (j, sj) in s.iter_mut().enumerate() {
             *sj = dot(&data[j * rows..(j + 1) * rows], x);
         }
         for (j, &sj) in s.iter().enumerate() {
             axpy_sub(sj, &data[j * rows..(j + 1) * rows], x);
         }
+        if let Some(h) = h.as_deref_mut() {
+            for (hj, &sj) in h.iter_mut().zip(&s) {
+                *hj += sj;
+            }
+        }
         norm2(x)
     };
-    let mut nu = pass(x);
+    let mut nu = pass(x, &mut h);
     let mut passes = 1;
     if lt(nu, eta * nu0) {
-        nu = pass(x);
+        nu = pass(x, &mut h);
         passes = 2;
     }
     (nu, passes)

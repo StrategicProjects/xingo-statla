@@ -28,6 +28,8 @@
 
 use core::fmt;
 
+use xingo_sparse::{KktError, LuError};
+
 use crate::OperatorError;
 
 /// Everything that can go wrong, for every function of the crate (decision
@@ -96,6 +98,13 @@ pub enum StatlaError {
     },
     /// The caller's operator reported an error.
     Operator(OperatorError),
+    /// The LU of `A − σI` failed (shift-invert, [`crate::ShiftInvert`]); `σ`
+    /// is probably an eigenvalue.
+    Lu(LuError),
+    /// The LDLᵀ of `A − σI` failed ([`crate::SymShiftInvert`]); a
+    /// [`KktError::WrongInertia`] with zero pivots means `σ` is
+    /// (numerically) an eigenvalue.
+    Kkt(KktError),
 }
 
 /// `StatlaError::Operator` (a function, not a public `From` impl: the
@@ -135,6 +144,8 @@ impl fmt::Display for StatlaError {
                 "no convergence: {converged} of {requested} values after {restarts} restarts"
             ),
             Self::Operator(e) => write!(f, "operator error: {}", e.message),
+            Self::Lu(e) => write!(f, "LU of A - sigma I failed: {e}"),
+            Self::Kkt(e) => write!(f, "LDL^T of A - sigma I failed: {e}"),
         }
     }
 }
@@ -191,6 +202,16 @@ mod tests {
             })
             .to_string()
             .contains("boom")
+        );
+        assert!(
+            StatlaError::Kkt(KktError::NotSymmetric)
+                .to_string()
+                .contains("LDL")
+        );
+        assert!(
+            StatlaError::Lu(LuError::NotFactorized)
+                .to_string()
+                .contains("LU")
         );
         assert!(
             StatlaError::NotPositiveDefinite { column: 1 }

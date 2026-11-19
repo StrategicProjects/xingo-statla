@@ -12,9 +12,9 @@
 //!     matrix without a prescribed spectrum;
 //! (iv) a `DoubleDouble` smoke test of (i) with `u = 2⁻¹⁰⁵`.
 //!
-//! (iii) — against `scipy.sparse.linalg.svds` — is not in CI (no Python
-//! oracle); it was run once by hand (`l33-tables.md`). Every table line is
-//! printed with `--nocapture`.
+//! (iii) — against `scipy.sparse.linalg.svds` on Matrix Market matrices —
+//! moved to task L3.4 (D-0134) and lives in `tests/arpack.rs`, on committed
+//! fixtures. Every table line is printed with `--nocapture`.
 
 #![allow(
     clippy::cast_precision_loss,

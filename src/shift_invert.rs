@@ -1,0 +1,717 @@
+//! # Chapter 12.6.2 — Shift-invert: `eigsh_near` over `SupernodalLdl`, `eigs_near` over `Lu`
+//!
+//! ## Purpose
+//! *The `k` eigenvalues nearest a shift `σ`.* Krylov methods find the ends
+//! of the spectrum quickly and the interior slowly; ARPACK's mode 3 for the
+//! standard problem runs them on `(A − σI)⁻¹`, whose largest eigenvalues
+//! `ν = 1/(λ − σ)` are the `λ` nearest `σ`. The factorization comes from
+//! `xingo-sparse`: the threshold LU (`Lu<T>`) for a general `A`, and the
+//! supernodal `LBLᵀ` (`SupernodalLdl<T, K>`, Bunch–Kaufman pivoting,
+//! no regularization) for a symmetric one — whose **inertia** counts, by
+//! Sylvester's law, the eigenvalues of `A` below `σ`: a check of
+//! completeness that ARPACK does not offer ([`SymShiftInvert::count_below`]).
+//!
+//! ## Notation
+//! `A ∈ R^{n×n}` sparse (CSC); `σ` the real shift; `M = A − σI`; `ν` the
+//! eigenvalues of `M⁻¹`; `In(M) = (n₊, n₋, n₀)` its inertia.
+//!
+//! ## Algorithm SI (symmetric, [`eigsh_near`])
+//! SI1. \[Check.\] `A` square and structurally valid, entries and `σ`
+//!      finite; the arguments of [`crate::eigsh()`] are validated first.
+//! SI2. \[Form.\] The lower triangle of `M` (entries `a_ij`, `i ≥ j`, of the
+//!      input — only the lower triangle is read — with `σ` subtracted on the
+//!      diagonal; an entry that becomes exactly zero is not stored, as the
+//!      CSC invariant requires, and the analysis adds the structural
+//!      diagonal).
+//! SI3. \[Factorize.\] Analyze with the crate's own AMD and factorize by the
+//!      `LBLᵀ` path of `SupernodalLdl` (no regularization: `Regularization::
+//!      none()` on an augmented form). That path checks the inertia against
+//!      the form's (`KktForm::Augmented { n_primal, n_dual }` expects
+//!      `(n_dual, n_primal, 0)`), and the inertia of `M` is not known in
+//!      advance: the first attempt declares `(n, 0, 0)` (right whenever
+//!      `σ` is below the spectrum); on `WrongInertia { found }` with `found.zero
+//!      = 0` the analysis and the factorization are repeated with
+//!      `n_primal = found.negative` — at most two factorizations. A zero
+//!      pivot (`found.zero > 0`, or `ZeroPivot`) means `σ` is numerically an
+//!      eigenvalue: [`StatlaError::Kkt`].
+//! SI4. \[Count.\] `count_below = n₋`, the eigenvalues of `A` strictly below
+//!      `σ` (Sylvester; exact for the computed factorization, i.e. for a
+//!      matrix within the backward error of `LBLᵀ` from `M`).
+//! SI5. \[Iterate.\] [`crate::eigsh()`] with `LM` on `x ↦ M⁻¹x`, each
+//!      application by Algorithm R below (two solves and one product with
+//!      `M`).
+//! SI6. \[Map back.\] `λ = σ + 1/ν`; the order (largest `|ν|` first) is
+//!      nearest `σ` first; the eigenvectors are those of `M⁻¹`.
+//!
+//! ## Algorithm SG (general, [`eigs_near`])
+//! SG1–SG2 as SI1–SI2 on the whole of `M`. SG3: `Lu<T>` with
+//! `LuOptions::for_scalar::<T>()` (the defaults of `xingo-sparse`; `M`
+//! is the "basis" whose columns are those of `M`); singular is
+//! [`StatlaError::Lu`]. SG5: [`crate::eigs()`] with `LM` on `x ↦ M⁻¹x`
+//! (`ftran`: row-indexed in, column-indexed out; Algorithm R). SG6: `λ = σ + 1/ν`
+//! computed by complex division. `1/ν` *conjugates the imaginary part's
+//! sign*, so a pair `ν, ν̄` (`+i` first) maps to `λ̄, λ`: the two values,
+//! and the imaginary parts of their vectors, are swapped back to keep the
+//! `+i` member first; a lone `k`-th member is replaced by its conjugate.
+//!
+//! ## Algorithm R (one step of iterative refinement per application)
+//! *Task L3.4, second round (answer to question Q-L34-4).* Both operators
+//! apply `x ↦ M⁻¹x` as
+//! R1. \[Solve.\] `y ← F⁻¹x` with the factorization `F ≈ M` (LU `ftran`, or
+//!     the `LBLᵀ` solve).
+//! R2. \[Residual.\] `r ← x − M y`, in the scalar `T`, with the stored `M`
+//!     (the whole `A − σI` for the LU; its lower triangle, applied
+//!     symmetrically, for the `LBLᵀ`).
+//! R3. \[Correct.\] `y ← y + F⁻¹r`.
+//!
+//! *What it guarantees.* Without R2–R3 the computed `y` solves `(M + δM) y
+//! = x` with `‖δM‖` the backward error of the factorization, which for a
+//! threshold LU (`rel_pivot_tol = 0.01`) or a Bunch–Kaufman `LBLᵀ` carries
+//! the element growth, `γ·u·‖M‖` with `γ` up to hundreds — and that, not
+//! the convergence tolerance, bounded the residual on `A` (measured `114·ncv
+//! ·u‖A‖` for `eigs_near`, `4.75` for `eigsh_near`, task L3.4 first round).
+//! One step of refinement **in the working precision** makes the solve
+//! backward stable with `‖δM‖ = O(n_row · u · ‖M‖)` (componentwise, the row
+//! counts of `M`), provided `γ·κ(M)·u` is well below one (Skeel 1980;
+//! Higham, *Accuracy and Stability*, ch. 12: fixed-precision refinement
+//! improves the *backward* error, not the forward one). That is what the
+//! residual on `A` needs: for a converged pair, `‖A y − λ y‖ = ‖M y − y/ν‖ ≤
+//! ‖M‖·ρ_ν/|ν| + ‖δM‖`, so a residual in `T` suffices; a residual in higher
+//! precision would improve the forward error of each solve, which the
+//! eigenvalue problem does not need (the error along the wanted eigenvector
+//! is harmless, as in ARPACK's mode 3). It does **not** remove the
+//! dependence on `κ(M)`: for `σ` within `γ·u·‖M‖` of an eigenvalue one step
+//! may not suffice (and the factorization would usually have failed with
+//! a zero pivot). *Measured* (`l34-tables.md`): with R2–R3 the residual on
+//! `A` satisfies the criterion of `eigsh`/`eigs`, `≤ (τ + c_K·ncv·u)‖A‖`, on
+//! every fixture.
+//!
+//! *Cost.* Per application one more solve and one sparse product with `M`
+//! (`2·nnz(M)` flops; the solves dominate), and the `n`-vectors `r`, `d`
+//! kept in the operator; the stored `M` doubles the matrix memory.
+//!
+//! ## Invariants
+//! (I1) `count_below + n₀ + n₊ = n` with `n₀ = 0` for every operator built.
+//! (I2) The applications solve `M y = x` with backward error `η = ‖x −
+//!      My‖_∞/(‖M‖_∞‖y‖_∞) = O(u)` after Algorithm R (measured `≤ 0.73u`
+//!      on the fixtures, against up to `526u` without it; tested `≤ 2u` by
+//!      `tests/arpack.rs`).
+//! (I4) Algorithm R runs on every application (one refinement step, never
+//!      more, never skipped: the results are reproducible bit for bit).
+//! (I3) `eigsh_near`/`eigs_near` return exactly the values `σ + 1/ν` of the
+//!      pairs `eigsh`/`eigs` returned on `M⁻¹`, in that order (up to the swap
+//!      of SG6 inside a pair).
+//!
+//! ## References
+//! Lehoucq, Sorensen & Yang, *ARPACK Users' Guide* (1998), mode 3;
+//! Parlett, *The Symmetric Eigenvalue Problem* (1998), §3.3 (Sylvester's
+//! inertia and spectrum slicing); Ericsson & Ruhe, "The spectral
+//! transformation Lanczos method", Math. Comp. 35 (1980); Chapters 5.15–5.16
+//! of `xingo-sparse` (`LBLᵀ`, Bunch–Kaufman). Cited from memory.
+
+use xingo_sparse::{
+    Amd, Col, CscMatrix, DenseKernel, KktError, KktForm, KktSolver, LuError, LuFactor, LuOptions,
+    NaiveDense, NumericLdl, Real, Regularization, SparseVec, SupernodalLdl, SupernodalOptions,
+};
+
+use crate::StatlaError;
+use crate::eigs::{Complex, Eigen, EigsOptions, SymEigen, Which, eigs, eigsh, validate_for};
+use crate::operator::{LinearOperator, OperatorError};
+use crate::real::{is_exact_zero, lt};
+use crate::schur::Cx;
+
+/// `j` as a `u32` index (a valid `CscMatrix` has dimensions `≤ u32::MAX`,
+/// checked by `check_invariants` before any use).
+fn idx32(j: usize) -> u32 {
+    u32::try_from(j).unwrap_or(u32::MAX)
+}
+
+/// Step R2: `r ← r − M y`, with `m` the whole `M` or (`symmetric`) its
+/// lower triangle applied as the symmetric matrix it stands for.
+fn sub_product<T: Real>(m: &CscMatrix<T>, y: &[T], r: &mut [T], symmetric: bool) {
+    for j in 0..m.n_cols() {
+        let (rows, vals) = m.col(Col::from_usize(j));
+        let yj = y[j];
+        let mut acc = T::ZERO;
+        for (&i, &v) in rows.iter().zip(vals) {
+            let iu = i as usize;
+            r[iu] -= v * yj;
+            if symmetric && iu != j {
+                acc += v * y[iu];
+            }
+        }
+        if symmetric {
+            r[j] -= acc;
+        }
+    }
+}
+
+/// The length check of an application of a shift-invert operator.
+fn check_apply(n: usize, x: usize, y: usize) -> Result<(), OperatorError> {
+    if x == n && y == n {
+        Ok(())
+    } else {
+        Err(OperatorError {
+            message: "shift-invert: x and y must have the order of A".to_owned(),
+        })
+    }
+}
+
+/// SI1/SG1 (after the structure check): square, finite entries and shift.
+fn check_input<T: Real>(a: &CscMatrix<T>, sigma: T) -> Result<usize, StatlaError> {
+    if a.n_rows() != a.n_cols() {
+        return Err(StatlaError::InvalidArgument {
+            what: "shift-invert: A is not square",
+        });
+    }
+    if let Some(index) = a.val.iter().position(|v| !v.is_finite()) {
+        return Err(StatlaError::NonFinite { what: "a", index });
+    }
+    if !sigma.is_finite() {
+        return Err(StatlaError::NonFinite {
+            what: "sigma",
+            index: 0,
+        });
+    }
+    Ok(a.n_cols())
+}
+
+/// SI2/SG2: `A − σI`, the whole matrix or its lower triangle.
+fn shifted<T: Real>(a: &CscMatrix<T>, sigma: T, lower_only: bool) -> CscMatrix<T> {
+    let n = a.n_cols();
+    let mut col_ptr = Vec::with_capacity(n + 1);
+    let mut row_idx = Vec::with_capacity(a.nnz() + n);
+    let mut val = Vec::with_capacity(a.nnz() + n);
+    col_ptr.push(0);
+    // An exact zero is not stored (invariant of `CscMatrix`): a diagonal
+    // entry that cancels, or `−σ` for `σ = 0`.
+    let push = |i: u32, v: T, row_idx: &mut Vec<u32>, val: &mut Vec<T>| {
+        if !is_exact_zero(v) {
+            row_idx.push(i);
+            val.push(v);
+        }
+    };
+    for j in 0..n {
+        let (rows, vals) = a.col(Col::from_usize(j));
+        let mut diag_done = false;
+        for (&i, &v) in rows.iter().zip(vals) {
+            let iu = i as usize;
+            if lower_only && iu < j {
+                continue;
+            }
+            if iu > j && !diag_done {
+                push(idx32(j), -sigma, &mut row_idx, &mut val);
+                diag_done = true;
+            }
+            if iu == j {
+                push(i, v - sigma, &mut row_idx, &mut val);
+                diag_done = true;
+            } else {
+                push(i, v, &mut row_idx, &mut val);
+            }
+        }
+        if !diag_done {
+            push(idx32(j), -sigma, &mut row_idx, &mut val);
+        }
+        col_ptr.push(row_idx.len());
+    }
+    CscMatrix {
+        n_rows: n,
+        col_ptr,
+        row_idx,
+        val,
+    }
+}
+
+/// `x ↦ (A − σI)⁻¹ x` for a square sparse `A`, by the threshold LU of
+/// `xingo-sparse` (`Lu<T>` over the columns of `A − σI`, factorized once),
+/// with one step of iterative refinement per application (Algorithm R: two
+/// solves and one product with `A − σI`, which the operator keeps). The
+/// operator of [`eigs_near`] (Algorithm SG of Chapter 12.6.2).
+#[derive(Debug)]
+pub struct ShiftInvert<T: Real = f64> {
+    sigma: T,
+    n: usize,
+    lu: xingo_sparse::Lu<T>,
+    work: SparseVec<T>,
+    /// `M = A − σI` (Algorithm R).
+    m: CscMatrix<T>,
+    /// The residual `r` of step R2.
+    r: Vec<T>,
+    /// The correction `d = F⁻¹r` of step R3.
+    d: Vec<T>,
+}
+
+impl<T: Real> ShiftInvert<T> {
+    /// Factorize `A − σI`.
+    ///
+    /// # Errors
+    /// [`StatlaError::InvalidArgument`] (not square; options outside the
+    /// domain `xingo-sparse` asserts), [`StatlaError::NonFinite`] (`a`,
+    /// `sigma`), [`StatlaError::Lu`] (a structurally invalid `a`, or
+    /// singular: `σ` is, numerically, an eigenvalue).
+    pub fn new(a: &CscMatrix<T>, sigma: T, opts: LuOptions) -> Result<Self, StatlaError> {
+        let n = check_input(a, sigma)?;
+        a.check_invariants()
+            .map_err(|e| StatlaError::Lu(LuError::Structure(e)))?;
+        let fin = |x: f64| x.is_finite() && !lt(x, 0.0);
+        if opts.search_limit == 0
+            || !lt(0.0, opts.rel_pivot_tol)
+            || lt(1.0, opts.rel_pivot_tol)
+            || !fin(opts.abs_pivot_tol)
+            || !fin(opts.drop_tol)
+            || !fin(opts.update_stability_tol)
+            || !lt(0.0, opts.update_multiplier_limit)
+        {
+            return Err(StatlaError::InvalidArgument {
+                what: "ShiftInvert: LuOptions outside their domain",
+            });
+        }
+        let m = shifted(a, sigma, false);
+        let mut lu = xingo_sparse::Lu::<T>::new(opts);
+        lu.factorize(&m).map_err(StatlaError::Lu)?;
+        Ok(Self {
+            sigma,
+            n,
+            lu,
+            work: SparseVec::new(n),
+            m,
+            r: vec![T::ZERO; n],
+            d: vec![T::ZERO; n],
+        })
+    }
+
+    /// The shift.
+    pub fn sigma(&self) -> T {
+        self.sigma
+    }
+}
+
+impl<T: Real> LinearOperator<T> for ShiftInvert<T> {
+    fn nrows(&self) -> usize {
+        self.n
+    }
+    fn ncols(&self) -> usize {
+        self.n
+    }
+    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+        check_apply(self.n, x.len(), y.len())?;
+        // R1.
+        self.lu_solve(x, y);
+        // R2.
+        self.r.copy_from_slice(x);
+        sub_product(&self.m, y, &mut self.r, false);
+        // R3.
+        let (r, mut d) = (core::mem::take(&mut self.r), core::mem::take(&mut self.d));
+        self.lu_solve(&r, &mut d);
+        for (yi, &di) in y.iter_mut().zip(&d) {
+            *yi += di;
+        }
+        (self.r, self.d) = (r, d);
+        Ok(())
+    }
+}
+
+impl<T: Real> ShiftInvert<T> {
+    /// `y ← F⁻¹x` by `ftran` (row-indexed in, column-indexed out).
+    fn lu_solve(&mut self, x: &[T], y: &mut [T]) {
+        self.work = SparseVec::from_dense(x);
+        self.lu.ftran(&mut self.work);
+        for (i, yi) in y.iter_mut().enumerate() {
+            *yi = self.work.get(idx32(i));
+        }
+    }
+}
+
+/// `x ↦ (A − σI)⁻¹ x` for a symmetric sparse `A` (lower triangle read), by
+/// `SupernodalLdl<T, K>` with no regularization; the inertia of `A − σI`
+/// is kept: by Sylvester's law it counts the eigenvalues below `σ`
+/// ([`SymShiftInvert::count_below`]) — a check ARPACK does not offer. Each
+/// application refines once (Algorithm R: two solves and one product with
+/// the kept lower triangle of `A − σI`). The operator of [`eigsh_near`]
+/// (Algorithm SI of Chapter 12.6.2).
+#[derive(Debug)]
+pub struct SymShiftInvert<T: Real = f64, K: DenseKernel<T> = NaiveDense> {
+    sigma: T,
+    n: usize,
+    below: usize,
+    ldl: SupernodalLdl<T, K>,
+    num: NumericLdl<T>,
+    /// The lower triangle of `M = A − σI` (Algorithm R).
+    low: CscMatrix<T>,
+    /// The residual `r` of step R2.
+    r: Vec<T>,
+}
+
+impl<T: Real, K: DenseKernel<T>> SymShiftInvert<T, K> {
+    /// Analyze (own AMD ordering) and factorize `A − σI`.
+    ///
+    /// # Errors
+    /// [`StatlaError::InvalidArgument`] (not square), [`StatlaError::NonFinite`]
+    /// (`a`, `sigma`), [`StatlaError::Kkt`] (a structurally invalid `a`; a
+    /// zero pivot: `σ` is numerically an eigenvalue).
+    pub fn new(a: &CscMatrix<T>, sigma: T, kernel: K) -> Result<Self, StatlaError> {
+        let n = check_input(a, sigma)?;
+        a.check_invariants()
+            .map_err(|e| StatlaError::Kkt(KktError::Structure(e)))?;
+        let low = shifted(a, sigma, true);
+        let ldl = SupernodalLdl::new(kernel, SupernodalOptions::default());
+        let pattern = low.pattern();
+        let attempt = |n_primal: usize| {
+            let form = KktForm::Augmented {
+                n_primal,
+                n_dual: n - n_primal,
+            };
+            let sym = ldl.analyze(&pattern, form, &Amd::default())?;
+            ldl.factorize(&sym, &low, Regularization::none())
+        };
+        // SI3.
+        let (num, inertia) = match attempt(0) {
+            Ok(r) => r,
+            Err(KktError::WrongInertia { found, .. }) if found.zero == 0 => {
+                attempt(found.negative).map_err(StatlaError::Kkt)?
+            }
+            Err(e) => return Err(StatlaError::Kkt(e)),
+        };
+        debug_assert_eq!(
+            inertia.positive + inertia.negative + inertia.zero,
+            n,
+            "(I1) the inertia counts every pivot"
+        );
+        Ok(Self {
+            sigma,
+            n,
+            below: inertia.negative,
+            ldl,
+            num,
+            low,
+            r: vec![T::ZERO; n],
+        })
+    }
+
+    /// The shift.
+    pub fn sigma(&self) -> T {
+        self.sigma
+    }
+
+    /// Number of eigenvalues of `A` strictly below `σ` (negative inertia of
+    /// `A − σI`).
+    #[must_use]
+    pub fn count_below(&self) -> usize {
+        self.below
+    }
+}
+
+impl<T: Real, K: DenseKernel<T>> LinearOperator<T> for SymShiftInvert<T, K> {
+    fn nrows(&self) -> usize {
+        self.n
+    }
+    fn ncols(&self) -> usize {
+        self.n
+    }
+    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+        check_apply(self.n, x.len(), y.len())?;
+        // R1.
+        y.copy_from_slice(x);
+        self.ldl.solve(&self.num, y);
+        // R2.
+        self.r.copy_from_slice(x);
+        sub_product(&self.low, y, &mut self.r, true);
+        // R3.
+        self.ldl.solve(&self.num, &mut self.r);
+        for (yi, &di) in y.iter_mut().zip(&self.r) {
+            *yi += di;
+        }
+        Ok(())
+    }
+}
+
+/// The `k` eigenvalues of the symmetric `A` nearest `σ`: [`eigsh()`] with
+/// `LargestMagnitude` on [`SymShiftInvert`], mapped back by `λ = σ + 1/ν`
+/// (ARPACK mode 3 for the standard problem), nearest first. Returns also
+/// [`SymShiftInvert::count_below`]. Only the lower triangle of `a` is read.
+///
+/// # Errors
+/// As [`eigsh()`] and [`SymShiftInvert::new`].
+pub fn eigsh_near<T: Real>(
+    a: &CscMatrix<T>,
+    k: usize,
+    sigma: T,
+    opts: &EigsOptions<T>,
+) -> Result<(SymEigen<T>, usize), StatlaError> {
+    validate_for(
+        a.n_rows(),
+        a.n_cols(),
+        k,
+        Which::LargestMagnitude,
+        opts,
+        true,
+    )?;
+    let mut op = SymShiftInvert::<T, NaiveDense>::new(a, sigma, NaiveDense)?;
+    let below = op.count_below();
+    let mut f = eigsh(&mut op, k, Which::LargestMagnitude, opts)?;
+    // SI6.
+    for v in &mut f.values {
+        *v = sigma + T::ONE / *v;
+    }
+    Ok((f, below))
+}
+
+/// The `k` eigenvalues of the general `A` nearest the real shift `σ`, by
+/// [`eigs()`] on [`ShiftInvert`] (`LuOptions::for_scalar::<T>()`), mapped
+/// back by `λ = σ + 1/ν`, nearest first; conjugate pairs keep the `+i`
+/// member first.
+///
+/// # Errors
+/// As [`eigs()`] and [`ShiftInvert::new`].
+pub fn eigs_near<T: Real>(
+    a: &CscMatrix<T>,
+    k: usize,
+    sigma: T,
+    opts: &EigsOptions<T>,
+) -> Result<Eigen<T>, StatlaError> {
+    validate_for(
+        a.n_rows(),
+        a.n_cols(),
+        k,
+        Which::LargestMagnitude,
+        opts,
+        false,
+    )?;
+    let mut op = ShiftInvert::new(a, sigma, LuOptions::for_scalar::<T>())?;
+    let mut f = eigs(&mut op, k, Which::LargestMagnitude, opts)?;
+    // SG6.
+    let n = a.n_rows();
+    let len = f.values.len();
+    let one = Cx::new(T::ONE, T::ZERO);
+    let mapped: Vec<Complex<T>> = f
+        .values
+        .iter()
+        .map(|nu| {
+            let w = one.div(Cx::new(nu.re, nu.im));
+            Complex {
+                re: sigma + w.re,
+                im: w.im,
+            }
+        })
+        .collect();
+    let mut i = 0;
+    while i < len {
+        let nu = f.values[i];
+        if lt(T::ZERO, nu.im) {
+            let paired = i + 1 < len && f.values[i + 1].re == nu.re && f.values[i + 1].im == -nu.im;
+            if paired {
+                f.values[i] = Complex {
+                    re: mapped[i].re,
+                    im: -mapped[i].im,
+                };
+                f.values[i + 1] = mapped[i];
+                if let Some(vi) = &mut f.vectors_im {
+                    for r in 0..n {
+                        vi.data.swap(r + i * n, r + (i + 1) * n);
+                    }
+                }
+                i += 2;
+                continue;
+            }
+            // A lone `+i` member: its conjugate.
+            f.values[i] = Complex {
+                re: mapped[i].re,
+                im: -mapped[i].im,
+            };
+            if let Some(vi) = &mut f.vectors_im {
+                for v in &mut vi.data[i * n..(i + 1) * n] {
+                    *v = -*v;
+                }
+            }
+        } else {
+            f.values[i] = mapped[i];
+            if is_exact_zero(nu.im) {
+                f.values[i].im = T::ZERO;
+            }
+        }
+        i += 1;
+    }
+    Ok(f)
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::float_cmp,
+    clippy::cast_possible_truncation
+)]
+mod tests {
+    use super::*;
+    use xingo_sparse::Triplets;
+
+    /// The tridiagonal `tridiag(−1, 2, −1)` of order `n`, full or lower.
+    fn lap1d(n: usize, lower: bool) -> CscMatrix<f64> {
+        let mut t = Triplets::new(n, n);
+        for i in 0..n {
+            t.push(i as u32, i as u32, 2.0);
+            if i + 1 < n {
+                t.push((i + 1) as u32, i as u32, -1.0);
+                if !lower {
+                    t.push(i as u32, (i + 1) as u32, -1.0);
+                }
+            }
+        }
+        t.to_csc().unwrap()
+    }
+
+    fn exact(n: usize) -> Vec<f64> {
+        (1..=n)
+            .map(|j| 2.0 - 2.0 * (j as f64 * core::f64::consts::PI / (n as f64 + 1.0)).cos())
+            .collect()
+    }
+
+    #[test]
+    fn count_below_and_nearest_values() {
+        let n = 50;
+        let lam = exact(n);
+        for lower in [true, false] {
+            let a = lap1d(n, lower);
+            for sigma in [-0.5, 0.3, 1.01, 2.05, 3.9, 4.5] {
+                let (f, below) = eigsh_near(&a, 4, sigma, &EigsOptions::default())
+                    .unwrap_or_else(|e| panic!("lower {lower} sigma {sigma}: {e:?}"));
+                assert_eq!(below, lam.iter().filter(|&&l| l < sigma).count(), "{sigma}");
+                let mut near = lam.clone();
+                near.sort_by(|x, y| (x - sigma).abs().total_cmp(&(y - sigma).abs()));
+                for (g, e) in f.values.iter().zip(&near) {
+                    assert!((g - e).abs() < 1e-12, "{sigma}: {:?} {near:?}", f.values);
+                }
+            }
+        }
+        // σ an eigenvalue: λ_17 = 2 − 2cos(π/3) = 1 for n = 50, and λ_3 = 2
+        // for n = 5 — a zero pivot, an error.
+        assert!(matches!(
+            eigsh_near(&lap1d(50, true), 4, 1.0, &EigsOptions::default()),
+            Err(StatlaError::Kkt(_))
+        ));
+        let a = lap1d(5, true);
+        assert!(matches!(
+            SymShiftInvert::<f64>::new(&a, 2.0, NaiveDense),
+            Err(StatlaError::Kkt(_))
+        ));
+        assert!(matches!(
+            ShiftInvert::new(&lap1d(5, false), 2.0, LuOptions::default()),
+            Err(StatlaError::Lu(_))
+        ));
+    }
+
+    #[test]
+    fn general_shift_invert_maps_pairs_back() {
+        // Block diagonal: rotation-scalings and reals; σ near a pair.
+        let blocks = [(1.0, 0.5), (2.0, 0.25), (3.0, 0.0), (0.5, 0.0), (2.2, 1.0)];
+        let mut t = Triplets::new(8, 8);
+        let mut r = 0u32;
+        for &(re, im) in &blocks {
+            if im == 0.0 {
+                t.push(r, r, re);
+                r += 1;
+            } else {
+                t.push(r, r, re);
+                t.push(r + 1, r + 1, re);
+                t.push(r, r + 1, -im);
+                t.push(r + 1, r, im);
+                r += 2;
+            }
+        }
+        let a = t.to_csc().unwrap();
+        let f = eigs_near(&a, 3, 1.9, &EigsOptions::default()).unwrap();
+        let want = [(2.0, 0.25), (2.0, -0.25), (1.0, 0.5)];
+        for (g, w) in f.values.iter().zip(want) {
+            assert!(
+                (g.re - w.0).abs() < 1e-12 && (g.im - w.1).abs() < 1e-12,
+                "{:?}",
+                f.values
+            );
+        }
+        // Residuals with the returned vectors (A dense here).
+        let yr = f.vectors_re.as_ref().unwrap();
+        let yi = f.vectors_im.as_ref().unwrap();
+        let mut dense = [[0.0; 8]; 8];
+        for j in 0..8 {
+            let (rows, vals) = a.col(Col::from_usize(j));
+            for (&i, &v) in rows.iter().zip(vals) {
+                dense[i as usize][j] = v;
+            }
+        }
+        for (c, th) in f.values.iter().enumerate() {
+            let (y, z) = (&yr.data[c * 8..(c + 1) * 8], &yi.data[c * 8..(c + 1) * 8]);
+            let mut e = 0.0f64;
+            for i in 0..8 {
+                let (mut sr, mut si) = (0.0, 0.0);
+                for j in 0..8 {
+                    sr += dense[i][j] * y[j];
+                    si += dense[i][j] * z[j];
+                }
+                e = e
+                    .max((sr - (th.re * y[i] - th.im * z[i])).abs())
+                    .max((si - (th.re * z[i] + th.im * y[i])).abs());
+            }
+            assert!(e < 1e-12, "{c}: {e}");
+        }
+    }
+
+    #[test]
+    fn errors_are_returned() {
+        let a = lap1d(6, true);
+        let o = EigsOptions::<f64>::default();
+        let rect = CscMatrix::<f64>::zeros(3, 4);
+        assert!(matches!(
+            eigsh_near(&rect, 1, 0.0, &o),
+            Err(StatlaError::InvalidArgument { .. })
+        ));
+        assert!(matches!(
+            eigs_near(&rect, 1, 0.0, &o),
+            Err(StatlaError::InvalidArgument { .. })
+        ));
+        assert!(matches!(
+            SymShiftInvert::<f64>::new(&rect, 0.0, NaiveDense),
+            Err(StatlaError::InvalidArgument { .. })
+        ));
+        assert!(matches!(
+            eigsh_near(&a, 0, 0.0, &o),
+            Err(StatlaError::InvalidArgument { .. })
+        ));
+        assert!(matches!(
+            eigsh_near(&a, 2, f64::NAN, &o),
+            Err(StatlaError::NonFinite { what: "sigma", .. })
+        ));
+        let mut bad = a.clone();
+        bad.val[0] = f64::INFINITY;
+        assert!(matches!(
+            eigsh_near(&bad, 2, 0.0, &o),
+            Err(StatlaError::NonFinite {
+                what: "a",
+                index: 0
+            })
+        ));
+        let mut broken = a.clone();
+        broken.row_idx[0] = 99;
+        assert!(matches!(
+            eigsh_near(&broken, 2, 0.0, &o),
+            Err(StatlaError::Kkt(KktError::Structure(_)))
+        ));
+        assert!(matches!(
+            eigs_near(&broken, 2, 0.0, &o),
+            Err(StatlaError::Lu(LuError::Structure(_)))
+        ));
+        let lo = LuOptions {
+            rel_pivot_tol: 0.0,
+            ..LuOptions::default()
+        };
+        assert!(matches!(
+            ShiftInvert::new(&lap1d(6, false), 0.0, lo),
+            Err(StatlaError::InvalidArgument { .. })
+        ));
+        // Wrong lengths in an application.
+        let mut op = SymShiftInvert::<f64>::new(&a, 0.1, NaiveDense).unwrap();
+        assert!(op.apply(&[1.0; 5], &mut [0.0; 6]).is_err());
+        let mut op = ShiftInvert::new(&lap1d(6, false), 0.1, LuOptions::default()).unwrap();
+        assert!(op.apply(&[1.0; 6], &mut [0.0; 7]).is_err());
+        assert_eq!(op.sigma(), 0.1);
+    }
+}

@@ -1,8 +1,8 @@
 # xingo-statla (PLAN.md trilha L3, D-0082 and D-0127): updatable and
 # matrix-free linear algebra for statistics, generic in the scalar `Real` of
-# `xingo-sparse`. Task L3.2 implements the first part (Chapter 12.0, 12.2,
-# 12.3: views, errors, `Cholesky` and `Qr` with updates); L3.3 and L3.4 add
-# the randomized and Krylov parts. Unpublished until the v0.1 surface is
+# `xingo-sparse`. Task L3.2 implemented the first part (Chapter 12.0, 12.2,
+# 12.3: views, errors, `Cholesky` and `Qr` with updates); L3.3 the
+# randomized SVD and `svds`; L3.4 `eigsh`/`eigs` and shift-invert. Unpublished until the v0.1 surface is
 # complete (`publish = false`). As in `xingo-sparse` and `xingo-extprec`,
 # nothing is inherited from the workspace (`*.workspace = true`), so that
 # this directory can later be mirrored and built alone; the values must stay

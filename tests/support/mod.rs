@@ -18,6 +18,7 @@
     clippy::cast_possible_truncation
 )]
 
+pub mod mm;
 pub mod svd;
 
 use xingo_extprec::DoubleDouble as Dd;

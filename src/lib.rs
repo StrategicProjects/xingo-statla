@@ -10,15 +10,17 @@
 //! [`AdjointOperator`] (Chapter 12.0.5), the reproducible generator
 //! (Chapter 12.1, [`Sketch`]), [`rsvd()`] and [`range_finder`] (12.4), and
 //! [`svds()`] by Golub–Kahan–Lanczos bidiagonalization with thick restart
-//! (12.5), on the shared Krylov machinery (12.0.6–12.0.7). **To come**
-//! (L3.4), with the names and signatures of the approved contract
-//! (`contracts/xingo-statla`): `eigsh`, `eigs`, shift-invert (12.6); nothing
-//! of those exists yet (no stubs). (The chapter number 12 is provisional:
-//! 1–8, 10 and 11 are taken.)
+//! (12.5), on the shared Krylov machinery (12.0.6–12.0.7). L3.4 completes
+//! the v0.1 surface of the contract: [`eigsh()`] and [`eigs()`] by
+//! Krylov–Schur restarted Lanczos/Arnoldi with ARPACK's `which` vocabulary
+//! (12.6), the small dense eigensolvers they need (12.6.1), and
+//! shift-invert over the factorizations of `xingo-sparse`, [`eigsh_near`]
+//! with the inertia count and [`eigs_near`] (12.6.2). (The chapter number
+//! 12 is provisional: 1–8, 10 and 11 are taken.)
 //!
 //! ## Purpose
 //! Statistical computing keeps asking questions that a dense library
-//! answers only by starting from scratch. The three this edition answers:
+//! answers only by starting from scratch. The four this edition answers:
 //!
 //! 1. *A row arrived (or left); what is the new least-squares fit?* — a QR
 //!    factorization **updated** in `O(mn)` instead of refactorized in
@@ -34,6 +36,10 @@
 //!    with a stated expected error ([`rsvd()`]), and a deterministic truncated
 //!    SVD by Golub–Kahan–Lanczos bidiagonalization accurate to `ε σ_1` on
 //!    every singular value ([`svds()`]).
+//! 4. *What are `k` eigenvalues at one end of the spectrum (or nearest
+//!    `σ`) of a large sparse or implicit operator?* — [`eigsh()`]/[`eigs()`]
+//!    by Krylov–Schur restarted Lanczos/Arnoldi with ARPACK's `which`
+//!    vocabulary, and [`eigsh_near`]/[`eigs_near`] by shift-invert.
 //!
 //! The crate does not depend on the solver; the R and Python packages will
 //! reach it through `xingo-ffi` (L4).
@@ -61,6 +67,9 @@
 //! | 12.3 | `qr` | [`Qr`], [`QrOptions`] |
 //! | 12.4 | `rsvd` | [`rsvd()`], [`range_finder`], [`RsvdOptions`], [`Svd`], [`SvdStats`] |
 //! | 12.5 | `svds` | [`svds()`], [`SvdsOptions`], [`SvdWhich`] |
+//! | 12.6 | `eigs` | [`eigsh()`], [`eigs()`], [`EigsOptions`], [`EigsStats`], [`SymEigen`], [`Eigen`], [`Complex`], [`Which`] |
+//! | 12.6.1 | `schur` (private) | symmetric Jacobi, Hessenberg + Francis real Schur, block swaps and reordering, eigenvectors of the quasi-triangular form |
+//! | 12.6.2 | `shift_invert` | [`ShiftInvert`], [`SymShiftInvert`], [`eigsh_near`], [`eigs_near`] |
 //!
 //! ## What is reused from `xingo-sparse`, and why (D-0080 layering)
 //! | need | taken from `xingo-sparse` | new here |
@@ -68,7 +77,8 @@
 //! | scalar | [`Real`] (generic everywhere; `f64` default; `DoubleDouble` of `xingo-extprec` instantiates unchanged) | — |
 //! | owned dense | [`DenseBlock`] (column-major, `ld = rows`) | borrowed views with `ld` (S3) |
 //! | the initial Cholesky factorization | [`DenseKernel::potrf`] via a type parameter `K = NaiveDense`, as `SupernodalLdl<T, K>` does | — |
-//! | Householder, Givens, Gram–Schmidt | — (not in `DenseKernel`) | internal, generic in `T` (S1) |
+//! | Householder, Givens, Gram–Schmidt, Jacobi, Francis/Schur | — (not in `DenseKernel`) | internal, generic in `T` (S1) |
+//! | shift-invert solves | `Lu<T>` (general), `SupernodalLdl<T, K>` `LBLᵀ` + inertia (symmetric) | [`ShiftInvert`], [`SymShiftInvert`], one step of iterative refinement per application |
 //! | comparisons | the helpers of Chapter 5.6 are `pub(crate)` there | a private copy with the same definitions (module `real`) |
 //!
 //! **`DoubleDouble`.** Every algorithm needs only `+ − · /`, `sqrt`, `abs`
@@ -127,6 +137,9 @@
 //!
 //! (R1)–(R2), (G1)–(G5): [`rsvd()`] and [`svds()`], Chapters 12.4 and 12.5
 //!      (`c_G = 8`, measured).
+//! (K1)–(K4), (E1)–(E3), (I1)–(I3): [`eigsh()`]/[`eigs()`], the small dense
+//!      eigensolvers and shift-invert, Chapters 12.6–12.6.2 (`c_K = 8`,
+//!      measured in `f64`).
 //!
 //! The constants `c_H`, `c_Q` come from the measurements of the example
 //! `accuracy` with a margin, and live in the tests and in the argument of
@@ -139,8 +152,10 @@
 //! * **S3** — `MatRef`/`MatMut` live here.
 //! * **S4** — own xoshiro256++, Marsaglia polar method, own `ln` (12.1).
 //! * **S5** — `apply(&mut self, …) -> Result`; separate [`AdjointOperator`].
-//! * **S6** — names `svds`, `rsvd`, `range_finder` (and `eigs`, `eigsh` in
-//!   L3.4).
+//! * **S6** — names `eigs`, `eigsh`, `svds`, `rsvd`, `range_finder`.
+//! * **S7** — Krylov–Schur restart (Stewart 2001) for [`eigs()`] and
+//!   [`eigsh()`], one engine for both (Chapter 12.6), not ARPACK's
+//!   implicit QR shifts; results compared with ARPACK.
 //! * **S8** — thin QR with five operations; Cholesky update/downdate;
 //!   Cholesky insert/delete of a variable in v0.2.
 //! * **S9** — acceptance criteria rewritten on the pilot's numbers (each
@@ -149,8 +164,7 @@
 //!   [`SvdWhich`] `#[non_exhaustive]`; options with public fields and
 //!   `Default`; non-convergence is `Err(NoConvergence)` unless
 //!   `allow_partial`.
-//!
-//! (S7 concerns L3.4.)
+
 //!
 //! ## References
 //! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §5.1 (Givens,
@@ -171,13 +185,19 @@
 //! implicitly restarted Lanczos bidiagonalization methods", SISC 27
 //! (2005). Hestenes, J. SIAM 6 (1958); Demmel & Veselić, SIMAX 13 (1992).
 //! Blackman & Vigna, ACM TOMS 47 (2021). Marsaglia & Bray, SIAM Review 6
-//! (1964). **All cited from memory**; no source was reopened in tasks L3.2
-//! and L3.3 (the xoshiro256++ reference outputs were read in the tests of
-//! `rand` 0.9.4).
+//! (1964). Stewart, "A Krylov–Schur algorithm for large eigenproblems",
+//! SIMAX 23 (2001); Wu & Simon, SIMAX 22 (2000); Lehoucq, Sorensen & Yang,
+//! *ARPACK Users' Guide* (1998); Bai & Demmel, Linear Algebra Appl. 186
+//! (1993); LAPACK `dlahqr`, `dlanv2`, `dlaexc`, `dtrevc`. **All cited from
+//! memory**; no source was reopened in tasks L3.2–L3.4 (the xoshiro256++
+//! reference outputs were read in the tests of `rand` 0.9.4; ARPACK's tie
+//! order in `dngets` is recalled, and checked only against scipy's
+//! results on the fixtures).
 
 #![forbid(unsafe_code)]
 
 mod cholesky;
+mod eigs;
 mod error;
 mod jacobi;
 mod krylov;
@@ -186,11 +206,14 @@ mod qr;
 mod random;
 mod real;
 mod rsvd;
+mod schur;
+mod shift_invert;
 mod small;
 mod svds;
 mod view;
 
 pub use cholesky::{CholOptions, Cholesky, DowndateInfo};
+pub use eigs::{Complex, Eigen, EigsOptions, EigsStats, SymEigen, Which, eigs, eigsh};
 pub use error::StatlaError;
 pub use operator::{
     AdjointOperator, FnAdjointOperator, FnOperator, LinearOperator, OperatorError, from_fn,
@@ -199,6 +222,7 @@ pub use operator::{
 pub use qr::{Qr, QrOptions};
 pub use random::Sketch;
 pub use rsvd::{RsvdOptions, Svd, SvdStats, range_finder, rsvd};
+pub use shift_invert::{ShiftInvert, SymShiftInvert, eigs_near, eigsh_near};
 pub use svds::{SvdWhich, SvdsOptions, svds};
 pub use view::{MatMut, MatRef};
 pub use xingo_sparse::{DenseBlock, DenseKernel, NaiveDense, Real};

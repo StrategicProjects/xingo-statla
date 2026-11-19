@@ -115,9 +115,11 @@
 //! spectra down to `10⁻¹⁴ σ_1`, clusters included, where the gap to the
 //! neighbours is `≥ 10⁻⁸ σ_1` — the reference SVD is the construction
 //! itself, certified to `u‖A‖_F` by Weyl, and cross-checked against a
-//! one-sided Jacobi SVD in double-double (tests/svds.rs); (iii) the scipy
-//! comparison is not in CI (no Python oracle; checked once by hand,
-//! `l33-tables.md`); (iv) `DoubleDouble`: (i) with `u = 2⁻¹⁰⁵`.
+//! one-sided Jacobi SVD in double-double (tests/svds.rs); (iii) against
+//! `scipy.sparse.linalg.svds` on Matrix Market matrices, `1e-10` relative
+//! on the `σ_i ≥ 10⁻³σ_1` with gap `≥ 10⁻⁶σ_1` — moved to task L3.4
+//! (D-0134), in CI on committed fixtures (tests/arpack.rs); (iv)
+//! `DoubleDouble`: (i) with `u = 2⁻¹⁰⁵`.
 //!
 //! ## References
 //! Golub & Kahan, "Calculating the singular values and pseudo-inverse of

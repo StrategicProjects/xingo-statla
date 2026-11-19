@@ -1,7 +1,7 @@
 //! # Chapter 12.0.7 — Krylov machinery shared by the restarted drivers
 //!
 //! ## Purpose
-//! [`crate::svds()`] (Chapter 12.5) and, in L3.4, `eigsh`/`eigs` (12.6)
+//! [`crate::svds()`] (Chapter 12.5) and [`crate::eigsh()`]/[`crate::eigs()`] (12.6)
 //! grow orthonormal bases one vector at a time, restart them keeping a few
 //! Ritz vectors, and lock what has converged. The three pieces they share
 //! live here, so that the L3.4 engines reuse them unchanged: the expansion
@@ -52,27 +52,42 @@ use xingo_sparse::Real;
 
 use crate::random::Rng;
 use crate::real::lt;
-use crate::small::{norm2, orthogonalize_against};
+use crate::small::{norm2, orthogonalize_against, orthogonalize_prefix};
 
-/// Algorithm E on the first `ncols` columns of `basis` (`rows` rows);
-/// on return `w` holds `v_{ncols+1}`. Returns the coupling coefficient
-/// (`0` on breakdown). `reorth` counts the second DGKS passes.
+/// Algorithm E with the Gram–Schmidt coefficients of step E1 accumulated
+/// into `h` (length `≥ ncols`, added to): the Arnoldi step of Chapter 12.6.
+/// On breakdown the coefficients of the replacement vector are *not*
+/// recorded (it is not `A v_j`). Otherwise as [`expand`].
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn expand<T: Real>(
+pub(crate) fn expand_arnoldi<T: Real>(
     basis: &[T],
     rows: usize,
     ncols: usize,
     w: &mut [T],
+    h: &mut [T],
     eta: T,
     floor: T,
     rng: &mut Rng,
     reorth: &mut usize,
 ) -> T {
     // E1.
-    let (nu, passes) = orthogonalize_against(basis, rows, ncols, w, eta);
+    let (nu, passes) = orthogonalize_prefix(basis, rows, ncols, w, eta, Some(h));
     if passes == 2 {
         *reorth += 1;
     }
+    replace_or_normalize(basis, rows, ncols, w, nu, floor, rng)
+}
+
+/// Steps E2–E3 on an orthogonalized `w` of norm `nu`.
+fn replace_or_normalize<T: Real>(
+    basis: &[T],
+    rows: usize,
+    ncols: usize,
+    w: &mut [T],
+    nu: T,
+    floor: T,
+    rng: &mut Rng,
+) -> T {
     // E2.
     if lt(floor, nu) {
         for v in w.iter_mut() {
@@ -95,6 +110,28 @@ pub(crate) fn expand<T: Real>(
         *v = *v / nr;
     }
     T::ZERO
+}
+
+/// Algorithm E on the first `ncols` columns of `basis` (`rows` rows);
+/// on return `w` holds `v_{ncols+1}`. Returns the coupling coefficient
+/// (`0` on breakdown). `reorth` counts the second DGKS passes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand<T: Real>(
+    basis: &[T],
+    rows: usize,
+    ncols: usize,
+    w: &mut [T],
+    eta: T,
+    floor: T,
+    rng: &mut Rng,
+    reorth: &mut usize,
+) -> T {
+    // E1.
+    let (nu, passes) = orthogonalize_against(basis, rows, ncols, w, eta);
+    if passes == 2 {
+        *reorth += 1;
+    }
+    replace_or_normalize(basis, rows, ncols, w, nu, floor, rng)
 }
 
 /// Algorithm K.
