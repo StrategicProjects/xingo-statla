@@ -403,21 +403,21 @@ assert_eq!(below, <span class="c-flag">33</span>);  <span class="c-cmt">// λ be
   <section id="limits">
     <div class="wrap">
       <h2>Known limitations of 0.1</h2>
-      <p class="sub">What is still open, each in one sentence.</p>
+      <p class="sub">What is still open, each in one sentence. The ones that can be closed have an issue.</p>
       <div class="card scroll">
         <table class="cmp">
           <tbody>
-            <tr><td>The refinement of shift-invert was not tested with σ very close to an eigenvalue, where one step may not suffice.</td></tr>
-            <tr><td>No matrix above 400 × 400 and no strongly non-normal matrix was tested for the eigensolvers, so the coupling check before locking a Schur block is untested defense code.</td></tr>
+            <tr><td>The refinement of shift-invert was not tested with σ very close to an eigenvalue, where one step may not suffice (<a href="https://github.com/StrategicProjects/xingo-statla/issues/1">#1</a>).</td></tr>
+            <tr><td>No matrix above 400 × 400 and no strongly non-normal matrix was tested for the eigensolvers, so the coupling check before locking a Schur block is untested defense code (<a href="https://github.com/StrategicProjects/xingo-statla/issues/2">#2</a>).</td></tr>
             <tr><td>Interior <code>which</code> without shift-invert (<code>SM</code> on an indefinite matrix, <code>SI</code> on a complex spectrum) may not converge, as with ARPACK; use <code>eigsh_near</code> or <code>eigs_near</code>.</td></tr>
             <tr><td>Shift-invert of a symmetric matrix factorizes up to twice until <code>xingo-sparse</code> gains an indefinite form (<a href="https://github.com/StrategicProjects/xingo-sparse/issues/8">xingo-sparse#8</a>).</td></tr>
-            <tr><td>Shift-invert keeps a copy of <code>A − σI</code> for the refinement, which doubles the memory of the matrix.</td></tr>
-            <tr><td>The results come from one macOS aarch64 machine only (natively and under wasmtime), until the CI of this repository runs on the other targets.</td></tr>
-            <tr><td>The literature in the chapters is cited from memory, including ARPACK's tie order, which was checked only against scipy's answers.</td></tr>
-            <tr><td>The bound of the generator's logarithm in double-double is measured, not proven (in <code>f64</code> it is proven).</td></tr>
-            <tr><td>The updatable factorizations were tested on random matrices with <code>n ≤ 200</code> only, not on graded or badly scaled ones, and their guard against an underflowing Cholesky diagonal is never reached by a test.</td></tr>
-            <tr><td><code>eigs_near</code> in double-double, <code>svds</code> with both dimensions near 2 000 and the <code>faer</code> kernel beyond one test were not tested.</td></tr>
-            <tr><td>No timing is claimed: nothing was timed on an idle machine.</td></tr>
+            <tr><td>Shift-invert keeps a copy of <code>A − σI</code> for the refinement, which doubles the memory of the matrix (<a href="https://github.com/StrategicProjects/xingo-statla/issues/3">#3</a>).</td></tr>
+            <tr><td>s390x runs in CI under emulation (QEMU), not on hardware; no x86_64 CPU without SSE2 or with AVX-512 was tried.</td></tr>
+            <tr><td>The literature in the chapters is cited from memory, including ARPACK's tie order, which was checked only against scipy's answers (<a href="https://github.com/StrategicProjects/xingo-statla/issues/4">#4</a>).</td></tr>
+            <tr><td>The bound of the generator's logarithm in double-double is measured, not proven (in <code>f64</code> it is proven) (<a href="https://github.com/StrategicProjects/xingo-statla/issues/5">#5</a>).</td></tr>
+            <tr><td>The updatable factorizations were tested on random matrices with <code>n ≤ 200</code> only, not on graded or badly scaled ones, and their guard against an underflowing Cholesky diagonal is never reached by a test (<a href="https://github.com/StrategicProjects/xingo-statla/issues/6">#6</a>).</td></tr>
+            <tr><td><code>eigs_near</code> in double-double, <code>svds</code> with both dimensions near 2 000 and the <code>faer</code> kernel beyond one test were not tested (<a href="https://github.com/StrategicProjects/xingo-statla/issues/7">#7</a>).</td></tr>
+            <tr><td>No timing is claimed: nothing was timed on an idle machine (<a href="https://github.com/StrategicProjects/xingo-statla/issues/8">#8</a>).</td></tr>
           </tbody>
         </table>
       </div>

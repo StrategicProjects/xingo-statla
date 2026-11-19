@@ -353,21 +353,24 @@ internal); `rand` or `libm` as dependencies.
   restarts) until one Gram–Schmidt pass was added after it.
 * **Platforms.** The suite ran on macOS aarch64, in debug and release, on
   stable and on Rust 1.90, and in release as `wasm32-wasip1` under
-  wasmtime on the same machine; it was compiled, not run, for
-  `i686-unknown-linux-gnu`.
+  wasmtime on the same machine; the CI of the stand-alone repository runs
+  it on x86_64 Linux and Windows, aarch64 Linux and macOS, i686 Linux,
+  s390x Linux (big-endian, under QEMU, release only) and `wasm32-wasip1`
+  (under wasmtime).
 
 ## Known limitations
 
-What is still open in 0.1, each in one sentence.
+What is still open in 0.1, each in one sentence. The ones that can be
+closed have an issue.
 
 1. **Shift-invert close to an eigenvalue:** the refinement step was not
    tested with `σ` within `γ·u·‖A − σI‖` of an eigenvalue, where one step
    may not suffice (the factorization usually fails there with a zero
-   pivot).
+   pivot) ([#1](https://github.com/StrategicProjects/xingo-statla/issues/1)).
 2. **Size and normality:** no matrix above `400 × 400` was tested for the
    eigensolvers (`2000 × 200` for `svds`), nor any strongly non-normal
    matrix — the coupling check before locking a Schur block in `eigs` is
-   defense code no test exercises.
+   defense code no test exercises ([#2](https://github.com/StrategicProjects/xingo-statla/issues/2)).
 3. **Interior `which` without shift-invert** (`SM` on an indefinite
    matrix, `SI` on a complex spectrum) may not converge, as with ARPACK;
    use `eigsh_near`/`eigs_near`.
@@ -377,25 +380,24 @@ What is still open in 0.1, each in one sentence.
    ([xingo-sparse#8](https://github.com/StrategicProjects/xingo-sparse/issues/8)).
 5. **Memory of the refinement:** shift-invert keeps a copy of `A − σI`
    beside its factorization, which doubles the memory of the matrix (not
-   measured on large matrices).
-6. **One machine:** the results above come from macOS aarch64 only
-   (natively, and as WebAssembly under wasmtime), until the CI of the
-   stand-alone repository runs the suite on the other targets.
+   measured on large matrices) ([#3](https://github.com/StrategicProjects/xingo-statla/issues/3)).
+6. **Hardware:** s390x runs under emulation (QEMU), not on hardware, and
+   no x86_64 CPU without SSE2 or with AVX-512 was tried.
 7. **The literature in the chapters is cited from memory**, including the
    exact form of the HMT bound for `q > 0` and ARPACK's tie order in
    `dngets`, which was checked only against scipy's answers on the
-   fixtures.
+   fixtures ([#4](https://github.com/StrategicProjects/xingo-statla/issues/4)).
 8. **The logarithm of the generator in double-double** has a measured
    bound (`2.7u`, asserted `16u`), not a proven one; in `f64` it is proven
-   (`6.4u`, measured `3.5u`).
+   (`6.4u`, measured `3.5u`) ([#5](https://github.com/StrategicProjects/xingo-statla/issues/5)).
 9. **The updatable factorizations were tested on random matrices with
    `n ≤ 200`** and Haar-distributed singular vectors only — not on graded
    or badly scaled matrices — and the guard against a new Cholesky
-   diagonal underflowing to zero is defense code no test reaches.
+   diagonal underflowing to zero is defense code no test reaches ([#6](https://github.com/StrategicProjects/xingo-statla/issues/6)).
 10. **Not tested:** `eigs_near` in double-double, `svds` with both
     dimensions near 2 000 or with more than four restarts under heavy
-    locking, and the `faer` kernel beyond one test.
-11. **No timing is claimed:** nothing was timed on an idle machine.
+    locking, and the `faer` kernel beyond one test ([#7](https://github.com/StrategicProjects/xingo-statla/issues/7)).
+11. **No timing is claimed:** nothing was timed on an idle machine ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
 
 ## Design notes
 
