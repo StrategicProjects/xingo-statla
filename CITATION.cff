@@ -13,7 +13,7 @@ license:
 repository-code: "https://github.com/StrategicProjects/xingo-statla"
 url: "https://strategicprojects.github.io/xingo-statla/"
 version: 0.1.0
-# TODO(owner): `date-released:` with the date of publication.
+date-released: 2026-11-19
 keywords:
   - updating matrix factorizations
   - QR update

@@ -5,7 +5,7 @@ All notable changes to `xingo-statla` are recorded here. The format follows
 follows [Semantic Versioning](https://semver.org/); before 1.0, a minor
 version may change the public API.
 
-## [0.1.0] — Unreleased
+## [0.1.0] — 2026-11-19
 
 The first release: updatable and matrix-free linear algebra for statistics,
 generic in the scalar `Real` of `xingo-sparse` 0.5, its only runtime
@@ -79,5 +79,4 @@ aarch64 machine only; the literature of the chapters is cited from memory;
 the logarithm of the generator in double-double has a measured, not
 proven, bound.
 
-<!-- TODO(owner): replace "Unreleased" in the 0.1.0 heading with the date of publication, and add the link line below. -->
-<!-- [0.1.0]: https://github.com/StrategicProjects/xingo-statla/releases/tag/v0.1.0 -->
+[0.1.0]: https://github.com/StrategicProjects/xingo-statla/releases/tag/v0.1.0
