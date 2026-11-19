@@ -1,0 +1,67 @@
+# xingo-statla (PLAN.md trilha L3, D-0082 and D-0127): updatable and
+# matrix-free linear algebra for statistics, generic in the scalar `Real` of
+# `xingo-sparse`. Task L3.2 implements the first part (Chapter 12.0, 12.2,
+# 12.3: views, errors, `Cholesky` and `Qr` with updates); L3.3 and L3.4 add
+# the randomized and Krylov parts. Unpublished until the v0.1 surface is
+# complete (`publish = false`). As in `xingo-sparse` and `xingo-extprec`,
+# nothing is inherited from the workspace (`*.workspace = true`), so that
+# this directory can later be mirrored and built alone; the values must stay
+# equal to the workspace's.
+[package]
+name = "xingo-statla"
+version = "0.0.1"
+publish = false
+description = "Updatable and matrix-free linear algebra for statistics: QR and Cholesky with rank-1 updates and downdates, randomized and truncated SVD, and ARPACK-style eigs/eigsh by restarted Lanczos/Arnoldi over a linear-operator trait"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/StrategicProjects/xingo"
+keywords = ["linear-algebra", "cholesky", "qr", "updating", "statistics"]
+categories = ["mathematics", "science", "algorithms"]
+
+[features]
+default = []
+# The dense kernel `FaerDense` of `xingo-sparse` (f64 only) as the `K` of
+# `Cholesky`/`Qr`; off by default (decision S1 of D-0127).
+faer = ["xingo-sparse/faer"]
+
+[dependencies]
+# Scalar trait `Real`, `DenseBlock`, `DenseKernel`/`NaiveDense`. No other
+# runtime dependency (D-0127, S4: no `rand`, no `libm`).
+xingo-sparse = { path = "../sparse", default-features = false }
+
+[dev-dependencies]
+proptest = "1.6"
+# `DoubleDouble` (with `Real`, feature `sparse`): the second scalar of the
+# tests and the accumulator of the exact matrices `A_t` (invariants H2, Q2).
+xingo-extprec = { path = "../extprec", default-features = false, features = ["sparse"] }
+
+# The measurements behind the constants c_H and c_Q (Chapter 12.2, 12.3):
+# prints Markdown tables; `cargo run -p xingo-statla --release --example accuracy`.
+[[example]]
+name = "accuracy"
+
+# Sliding-window least squares with `Qr::insert_row`/`delete_row` (Chapter
+# 12.3), against refitting from scratch; ends in an `assert!`.
+[[example]]
+name = "windowed_regression"
+
+# The workspace's lints, spelled out (see the header comment).
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Mathematical notation is kept (PLAN.md §2.3): allowed per module when declared.
+many_single_char_names = "allow"
+# Loops over an index that addresses several arrays at once are the notation
+# of the chapters; clippy 1.90 (the MSRV) flags those that later versions accept.
+needless_range_loop = "allow"
+similar_names = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
