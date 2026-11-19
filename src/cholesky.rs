@@ -105,7 +105,8 @@
 //! any algorithm working from `R`), and the pilot's aggregate form (the
 //! maximum over 20 seeds at `n = 100, 200`: `≤ 10⁻¹²` where `κ ≤ 10⁶`, `≤
 //! 10×` the maximum distance everywhere) — and keep the literal criterion
-//! as an ignored test, pending question Q-L32-2 of task L3.2. The measured
+//! as an ignored test (question Q-L32-2 of task L3.2, settled this way by
+//! D-0132). The measured
 //! values are in `.claude/scratch/l32/l32-tables.md`; the example
 //! `accuracy` regenerates them.
 //!
@@ -192,6 +193,7 @@ pub struct Cholesky<T: Real = f64, K: DenseKernel<T> = NaiveDense> {
 
 /// What a successful downdate saw.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct DowndateInfo {
     /// `1 − ‖a‖²` of step C2, in `(downdate_tol, 1]`: near `0` means the
     /// result is nearly singular and its forward error is large.

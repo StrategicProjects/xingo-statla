@@ -1,0 +1,143 @@
+# CI of the stand-alone mirror of `xingo-statla` (the crate is developed in
+# the Xingó monorepo, https://github.com/StrategicProjects/xingo, whose CI
+# runs the same checks inside the workspace; this file is excluded from the
+# published package). In the mirror `xingo-sparse` and the dev-dependency
+# `xingo-extprec` come from crates.io. `ubuntu-latest` is x86_64: the first
+# run of the suite off aarch64 (the release was validated on macOS aarch64
+# only).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+# Read-only token; third-party actions are pinned to a commit (the tag is
+# in the comment).
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  PROPTEST_DISABLE_FAILURE_PERSISTENCE: 1
+
+jobs:
+  check:
+    name: fmt + clippy + test + docs (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, "1.90"] # stable and MSRV
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (default, feature faer)
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features faer -- -D warnings
+      - name: Test (default, feature faer)
+        run: |
+          cargo test
+          cargo test --features faer
+      - name: Test (release)
+        run: cargo test --release
+      # The public API, and the whole book as docs.rs and Pages build it
+      # (`--document-private-items`).
+      - name: Docs (public items; private items)
+        run: |
+          cargo doc --no-deps
+          cargo doc --no-deps --features faer
+          cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # `accuracy` prints the Markdown tables behind the constants c_H and
+      # c_Q; `windowed_regression` ends in an `assert!` against refitting.
+      # Release; no timing is asserted.
+      - name: Examples
+        run: |
+          cargo build --examples
+          cargo run --release --example windowed_regression
+          cargo run --release --example accuracy
+      - name: Package (dry run)
+        run: cargo publish --dry-run
+
+  # The generator, the Krylov drivers and the small dense eigensolvers are
+  # fixed sequences of IEEE operations (invariant R2 of Chapter 12.1), so
+  # the suite, with its pinned bits and the ARPACK fixtures, must pass on
+  # the targets the job above does not cover. The crate has no SIMD path.
+  targets:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "aarch64 macOS", os: macos-latest, target: "" }
+          - { name: "x86_64 Windows", os: windows-latest, target: "" }
+          - { name: "aarch64 Linux", os: ubuntu-24.04-arm, target: "" }
+          - { name: "i686 Linux, 32 bits", os: ubuntu-latest, target: i686-unknown-linux-gnu }
+          # Big-endian (the pinned bits are compared as `u64`, so a
+          # byte-order slip would show), run under QEMU user mode.
+          - { name: "s390x Linux, big-endian, QEMU", os: ubuntu-latest, target: s390x-unknown-linux-gnu }
+          # WebAssembly with WASI, run by wasmtime; the test harness runs
+          # on one thread.
+          - { name: "wasm32 WASI, wasmtime", os: ubuntu-latest, target: wasm32-wasip1 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: 32-bit C toolchain
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      # The cross linker and libc of s390x, and `qemu-s390x` as cargo's
+      # runner (`-L`: where the s390x dynamic loader and libc live); the
+      # doc-tests run through the same runner.
+      - name: s390x C toolchain and QEMU
+        if: matrix.target == 's390x-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-s390x-linux-gnu libc6-dev-s390x-cross qemu-user
+          echo "CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_LINKER=s390x-linux-gnu-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_RUNNER=qemu-s390x -L /usr/s390x-linux-gnu" >> "$GITHUB_ENV"
+      # wasmtime from its release, pinned by version and by the SHA-256 that
+      # GitHub records for the asset (no third-party action), as cargo's
+      # runner for `wasm32-wasip1`. `--dir` preopens the checkout at the
+      # same path, so that the tests read the Matrix Market fixtures in
+      # `tests/data` (by the absolute path `CARGO_MANIFEST_DIR`).
+      - name: wasmtime
+        if: matrix.target == 'wasm32-wasip1'
+        run: |
+          V=v50.0.2
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o wasmtime.tar.xz "https://github.com/bytecodealliance/wasmtime/releases/download/$V/wasmtime-$V-x86_64-linux.tar.xz"
+          echo "5db0ca8e838ab95a51ba9acdf11f42888bcd0092dda45a86129ae540c4fa952c  wasmtime.tar.xz" | sha256sum -c -
+          tar xJf wasmtime.tar.xz
+          echo "$RUNNER_TEMP/wasmtime-$V-x86_64-linux" >> "$GITHUB_PATH"
+          echo "CARGO_TARGET_WASM32_WASIP1_RUNNER=wasmtime --dir=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Test (debug and release; release only under QEMU)
+        shell: bash
+        run: |
+          T="${{ matrix.target }}"
+          if [ -n "$T" ]; then T="--target $T"; fi
+          # Under QEMU a debug run is many times slower (for xingo-extprec it
+          # did not finish in 80 min), so the emulated target runs the
+          # optimized build only; the debug assertions are exercised on
+          # every other target.
+          if [ "${{ matrix.target }}" = "s390x-unknown-linux-gnu" ]; then
+            cargo test $T --release
+            exit 0
+          fi
+          cargo test $T
+          cargo test $T --release

@@ -1,22 +1,29 @@
 //! # Chapter 12 — `xingo-statla`: updatable and matrix-free linear algebra for statistics
 //!
-//! **Status (tasks L3.2 and L3.3 of PLAN.md trilha L3; contract D-0127,
-//! approved by André on 2026-11-19).** L3.2 implemented the *updatable
-//! factorizations*: the dense views [`MatRef`]/[`MatMut`], the error type
-//! [`StatlaError`] (Chapter 12.0), [`Cholesky`] with rank-1 update and
-//! transactional downdate (Chapter 12.2) and the thin [`Qr`] with explicit
-//! `Q` and five updating operations (Chapter 12.3). L3.3 adds the
-//! *matrix-free* part: the operator traits [`LinearOperator`]/
-//! [`AdjointOperator`] (Chapter 12.0.5), the reproducible generator
-//! (Chapter 12.1, [`Sketch`]), [`rsvd()`] and [`range_finder`] (12.4), and
-//! [`svds()`] by Golub–Kahan–Lanczos bidiagonalization with thick restart
-//! (12.5), on the shared Krylov machinery (12.0.6–12.0.7). L3.4 completes
-//! the v0.1 surface of the contract: [`eigsh()`] and [`eigs()`] by
-//! Krylov–Schur restarted Lanczos/Arnoldi with ARPACK's `which` vocabulary
-//! (12.6), the small dense eigensolvers they need (12.6.1), and
-//! shift-invert over the factorizations of `xingo-sparse`, [`eigsh_near`]
-//! with the inertia count and [`eigs_near`] (12.6.2). (The chapter number
-//! 12 is provisional: 1–8, 10 and 11 are taken.)
+//! **Status: complete for v0.1 (tasks L3.2, L3.3 and L3.4).** The contract
+//! of the crate was ratified on 2026-11-19 (decision log of the Xingó
+//! solver, D-0127) and amended by what the implementation measured (D-0132,
+//! D-0134, D-0135); where they differ, this text and the code are
+//! authoritative. Labels such as L3.2 are tasks of the solver's plan, D-xxxx
+//! are entries of its decision log, and names such as `l34-tables.md` are
+//! the working notes of a task in the monorepo (not part of the package;
+//! the numbers that matter are quoted where they are used). L3.2
+//! implemented the *updatable factorizations*: the dense views
+//! [`MatRef`]/[`MatMut`], the error type [`StatlaError`] (Chapter 12.0),
+//! [`Cholesky`] with rank-1 update and transactional downdate (Chapter
+//! 12.2) and the thin [`Qr`] with explicit `Q` and five updating operations
+//! (Chapter 12.3). L3.3 added the *matrix-free* part: the operator traits
+//! [`LinearOperator`]/[`AdjointOperator`] (Chapter 12.0.5), the
+//! reproducible generator (Chapter 12.1, [`Sketch`]), [`rsvd()`] and
+//! [`range_finder`] (12.4), and [`svds()`] by Golub–Kahan–Lanczos
+//! bidiagonalization with thick restart (12.5), on the shared Krylov
+//! machinery (12.0.6–12.0.7). L3.4 completed the v0.1 surface:
+//! [`eigsh()`] and [`eigs()`] by Krylov–Schur restarted Lanczos/Arnoldi
+//! with ARPACK's `which` vocabulary (12.6), the small dense eigensolvers
+//! they need (12.6.1), and shift-invert over the factorizations of
+//! `xingo-sparse`, [`eigsh_near`] with the inertia count and [`eigs_near`]
+//! (12.6.2). (The chapter number 12 is that of the Xingó book: 1–8, 10 and
+//! 11 are other parts of the solver.)
 //!
 //! ## Purpose
 //! Statistical computing keeps asking questions that a dense library
@@ -145,7 +152,7 @@
 //! `accuracy` with a margin, and live in the tests and in the argument of
 //! [`Qr::check_invariants`], not as literals in kernels.
 //!
-//! ## Decisions of the review (André, 2026-11-19; D-0127)
+//! ## Decisions of the review (2026-11-19; D-0127)
 //! * **S1** — generic `T: Real`, with own small dense routines (internal).
 //! * **S2** — [`svds()`] is Golub–Kahan–Lanczos bidiagonalization with thick
 //!   restart, its own engine, full two-sided reorthogonalization.
@@ -211,6 +218,14 @@ mod shift_invert;
 mod small;
 mod svds;
 mod view;
+
+/// The code blocks of the crate's README, compiled and run as doc-tests
+/// (`cargo test --doc`) so that the README never drifts from the API, as in
+/// `xingo-sparse` and `xingo-extprec`. The README is not the root
+/// documentation — this chapter is.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
 
 pub use cholesky::{CholOptions, Cholesky, DowndateInfo};
 pub use eigs::{Complex, Eigen, EigsOptions, EigsStats, SymEigen, Which, eigs, eigsh};

@@ -1,23 +1,41 @@
 # xingo-statla (PLAN.md trilha L3, D-0082 and D-0127): updatable and
 # matrix-free linear algebra for statistics, generic in the scalar `Real` of
-# `xingo-sparse`. Task L3.2 implemented the first part (Chapter 12.0, 12.2,
-# 12.3: views, errors, `Cholesky` and `Qr` with updates); L3.3 the
-# randomized SVD and `svds`; L3.4 `eigsh`/`eigs` and shift-invert. Unpublished until the v0.1 surface is
-# complete (`publish = false`). As in `xingo-sparse` and `xingo-extprec`,
+# `xingo-sparse`. Track L3 is complete (L3.2: views, errors, `Cholesky` and
+# `Qr` with updates, D-0132; L3.3: operators, the reproducible generator,
+# `rsvd` and `svds`, D-0134; L3.4: `eigsh`/`eigs` and shift-invert,
+# D-0135). Publishable on its own, with its own version; its only runtime
+# dependency is `xingo-sparse`. As in `xingo-sparse` and `xingo-extprec`,
 # nothing is inherited from the workspace (`*.workspace = true`), so that
-# this directory can later be mirrored and built alone; the values must stay
-# equal to the workspace's.
+# this directory also builds alone: it is mirrored, by `git subtree split`,
+# to the stand-alone repository below (the routine of D-0097), which Zenodo
+# archives for the DOI. The values must stay equal to the workspace's.
 [package]
 name = "xingo-statla"
-version = "0.0.1"
-publish = false
-description = "Updatable and matrix-free linear algebra for statistics: QR and Cholesky with rank-1 updates and downdates, randomized and truncated SVD, and ARPACK-style eigs/eigsh by restarted Lanczos/Arnoldi over a linear-operator trait"
+version = "0.1.0"
+description = "Updatable and matrix-free linear algebra for statistics: QR and Cholesky with rank-1 updates and downdates, randomized and truncated SVD, and ARPACK-style eigs/eigsh by Krylov-Schur restarted Lanczos/Arnoldi over a linear-operator trait"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/StrategicProjects/xingo"
-keywords = ["linear-algebra", "cholesky", "qr", "updating", "statistics"]
+repository = "https://github.com/StrategicProjects/xingo-statla"
+homepage = "https://strategicprojects.github.io/xingo-statla/"
+readme = "README.md"
+documentation = "https://docs.rs/xingo-statla"
+keywords = ["linear-algebra", "eigenvalues", "svd", "qr-update", "statistics"]
 categories = ["mathematics", "science", "algorithms"]
+# The package is the source, its tests (with the Matrix Market fixtures and
+# the script that generated them), examples, README, CHANGELOG and licenses.
+# The proptest regression seeds are development state (replayed by `cargo
+# test` from a checkout, meaningless to a user of the crate); the workflows
+# are the mirror's CI and Pages; site/ is the mirror's landing page.
+exclude = ["tests/*.proptest-regressions", ".github/", "site/", ".zenodo.json"]
+
+# docs.rs builds with the private items so that every chapter appears: the
+# chapters of every module (the algorithms, the invariants, the measured
+# constants) are the documentation of private modules; the public items are
+# re-exported at the root. Not `all-features`: `faer` only adds an optional
+# dense kernel of `xingo-sparse` and would make docs.rs build faer.
+[package.metadata.docs.rs]
+rustdoc-args = ["--document-private-items"]
 
 [features]
 default = []
@@ -26,15 +44,31 @@ default = []
 faer = ["xingo-sparse/faer"]
 
 [dependencies]
-# Scalar trait `Real`, `DenseBlock`, `DenseKernel`/`NaiveDense`. No other
-# runtime dependency (D-0127, S4: no `rand`, no `libm`).
-xingo-sparse = { path = "../sparse", default-features = false }
+# Scalar trait `Real`, `DenseBlock`, `DenseKernel`/`NaiveDense`, the sparse
+# containers and the `Lu`/`SupernodalLdl` of shift-invert. No other runtime
+# dependency (D-0127, S4: no `rand`, no `libm`). From the registry, with no
+# `path`: the stand-alone mirror has no `../sparse`. Inside the Xingó
+# monorepo the root `Cargo.toml` patches it to `crates/sparse`
+# (`[patch.crates-io]`), so the workspace builds and tests against the local
+# source; the requirement must keep matching the local version, or the
+# patch goes unused (cargo warns) and the registry's is used. Only the 0.5
+# line: the public API of this crate takes and returns types of
+# `xingo-sparse` (`Real`, `DenseBlock`, `CscMatrix`, `LuOptions`), and
+# 0.5 is the version tested (in the workspace and from crates.io).
+xingo-sparse = { version = "0.5.0", default-features = false }
 
 [dev-dependencies]
-proptest = "1.6"
+# Without the default features `fork` and `timeout` (no test uses them):
+# their `rusty-fork`/`wait-timeout` do not build for `wasm32-wasip1`, one of
+# the targets of the mirror's CI (as in `xingo-extprec`).
+proptest = { version = "1.6", default-features = false, features = ["std", "bit-set"] }
 # `DoubleDouble` (with `Real`, feature `sparse`): the second scalar of the
 # tests and the accumulator of the exact matrices `A_t` (invariants H2, Q2).
-xingo-extprec = { path = "../extprec", default-features = false, features = ["sparse"] }
+# From the registry, for the same reason as `xingo-sparse` (a `path`-only
+# dev-dependency would be stripped by `cargo publish`, and the mirror has no
+# `../extprec`); the root `Cargo.toml` of the monorepo patches it to
+# `crates/extprec`. 0.1.3 is the published version the tests were run with.
+xingo-extprec = { version = "0.1.3", default-features = false, features = ["sparse"] }
 
 # The measurements behind the constants c_H and c_Q (Chapter 12.2, 12.3):
 # prints Markdown tables; `cargo run -p xingo-statla --release --example accuracy`.

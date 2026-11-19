@@ -1,0 +1,35 @@
+{
+  "title": "xingo-statla: updatable and matrix-free linear algebra for statistics",
+  "upload_type": "software",
+  "description": "<p>Updatable and matrix-free linear algebra for statistics in pure Rust: a thin QR with explicit Q and a Cholesky factor updated in place when rows, columns or rank-1 terms arrive or leave, with transactional failures; the randomized SVD of Halko, Martinsson and Tropp with a reproducible generator; a truncated SVD by thick-restart Golub–Kahan–Lanczos bidiagonalization; and ARPACK-style eigsh/eigs by Krylov–Schur restarted Lanczos/Arnoldi, with shift-invert over sparse factorizations and an inertia count. Generic in the scalar type, over a linear-operator trait. Part of the Xingó project.</p><p>Dual-licensed under MIT or Apache-2.0, at your option.</p>",
+  "creators": [
+    {
+      "name": "Leite, André"
+    }
+  ],
+  "license": "MIT",
+  "keywords": [
+    "updating matrix factorizations",
+    "QR update",
+    "Cholesky downdate",
+    "randomized SVD",
+    "truncated SVD",
+    "Lanczos bidiagonalization",
+    "Krylov-Schur",
+    "sparse eigenvalues",
+    "statistics",
+    "Rust"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/StrategicProjects/xingo-statla",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://strategicprojects.github.io/xingo-statla/",
+      "relation": "isDocumentedBy",
+      "scheme": "url"
+    }
+  ]
+}

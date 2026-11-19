@@ -232,7 +232,7 @@ fn forward_error_in_aggregate_dd() {
 /// `fwd ≤ 10⁻¹²` where `κ ≤ 10⁸`, else `≤ 10 · dist`. **Fails** (measured
 /// counterexamples in `l32-tables.md`: `n = 2`, `κ = 10⁶`, `fwd = 9.4·10⁻¹²`;
 /// `n = 100`, `κ = 10⁸`, 10 of 200 seeds above `10⁻¹²`). Kept, ignored,
-/// for the owner's decision (question Q-L32-2).
+/// as the record of the counterexample (question Q-L32-2, settled by D-0132).
 #[test]
 #[ignore = "the ratified per-instance criterion (iii) does not hold; question Q-L32-2"]
 fn ratified_iii_per_instance() {

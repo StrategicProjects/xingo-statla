@@ -325,6 +325,7 @@ impl<T: Real> Default for EigsOptions<T> {
 
 /// Work counters of the Krylov drivers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EigsStats {
     /// Restarts performed.
     pub restarts: usize,
@@ -338,6 +339,7 @@ pub struct EigsStats {
 
 /// Symmetric eigenpairs, most wanted first (in the order of `which`).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct SymEigen<T: Real = f64> {
     /// Eigenvalues.
     pub values: Vec<T>,
@@ -353,6 +355,7 @@ pub struct SymEigen<T: Real = f64> {
 /// `k` values: the conjugate of a `k`-th value with positive imaginary
 /// part is omitted, as scipy does).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Eigen<T: Real = f64> {
     /// Eigenvalues.
     pub values: Vec<Complex<T>>,

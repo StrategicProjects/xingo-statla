@@ -107,6 +107,7 @@ impl Default for RsvdOptions {
 /// A truncated SVD `A ≈ U diag(s) Vᵀ`: `U` is `m × k`, `V` is `n × k` (not
 /// transposed: R's `svd` convention), `s` nonincreasing.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Svd<T: Real = f64> {
     /// Left singular vectors.
     pub u: DenseBlock<T>,
@@ -120,6 +121,7 @@ pub struct Svd<T: Real = f64> {
 
 /// Work counters of [`rsvd()`] and [`crate::svds()`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SvdStats {
     /// Products with `A` (columns).
     pub applies: usize,

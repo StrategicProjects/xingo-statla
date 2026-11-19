@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>xingo-statla — updatable and matrix-free linear algebra for statistics, in pure Rust</title>
+<meta name="description" content="A Rust crate of updatable and matrix-free linear algebra for statistics: QR and Cholesky with row, column and rank-1 updates and transactional downdates, randomized and truncated SVD, and ARPACK-style eigsh/eigs by Krylov–Schur with shift-invert over sparse factorizations. Generic in the scalar, literate, deterministic, no unsafe." />
+<meta property="og:title" content="xingo-statla — updatable and matrix-free linear algebra for statistics" />
+<meta property="og:description" content="QR and Cholesky updates, rsvd and svds, eigsh and eigs by Krylov–Schur with shift-invert. Pure Rust, generic in the scalar, literate, deterministic." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://strategicprojects.github.io/xingo-statla/" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%CE%BB%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg-soft: #121a33;
+    --card: #16203f;
+    --border: #263457;
+    --fg: #e8edf7;
+    --muted: #9fb0d0;
+    --brand: #3fa7ff;
+    --brand-2: #29c7ac;
+    --accent: #ffb14e;
+    --code-bg: #0d1428;
+    --shadow: 0 12px 40px rgba(0,0,0,.35);
+    --radius: 16px;
+    --maxw: 1080px;
+    --cell: #3987e5;
+    --fill: #d95926;
+    --grid: #263457;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fe;
+      --bg-soft: #eef2fb;
+      --card: #ffffff;
+      --border: #dbe3f4;
+      --fg: #10192e;
+      --muted: #56648a;
+      --code-bg: #0d1428;
+      --shadow: 0 12px 36px rgba(30,45,90,.12);
+      --cell: #2a78d6;
+      --fill: #eb6834;
+      --grid: #e6ebf7;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--fg);
+    background:
+      radial-gradient(1100px 600px at 12% -8%, rgba(63,167,255,.18), transparent 60%),
+      radial-gradient(900px 500px at 96% 4%, rgba(41,199,172,.16), transparent 55%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--brand-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 22px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -.02em; font-size: 1.1rem; }
+  .brand .logo { font-size: 1.35rem; color: var(--brand); }
+  .nav-links { display: flex; gap: 22px; align-items: center; }
+  .nav-links a { color: var(--muted); font-weight: 600; font-size: .95rem; }
+  .nav-links a:hover { color: var(--fg); text-decoration: none; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: 12px; font-weight: 700; font-size: .95rem;
+    border: 1px solid var(--border); color: var(--fg); background: var(--card);
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn.primary { background: linear-gradient(135deg, var(--brand), #5b73ff); color: #fff; border: none; }
+  @media (max-width: 720px) { .nav-links a.hide-sm { display: none; } }
+
+  .hero { padding: 74px 0 40px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--brand-2); background: color-mix(in srgb, var(--brand-2) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand-2) 30%, transparent);
+    padding: 6px 12px; border-radius: 999px;
+  }
+  h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); line-height: 1.05; letter-spacing: -.03em; margin: 18px 0 14px; }
+  h1 .grad { background: linear-gradient(120deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: 1.18rem; color: var(--muted); max-width: 46ch; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 26px; }
+  .badges img { height: 22px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 40px; align-items: center; }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
+
+  .term {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .term-title { margin-left: 8px; color: #7f8bb0; font: 600 .82rem ui-monospace, monospace; }
+  pre { margin: 0; padding: 18px 18px 22px; overflow-x: auto; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88rem; }
+  pre code { color: #d7e0f5; }
+  p code, li code, td code { background: color-mix(in srgb, var(--brand) 12%, transparent); padding: 1px 6px; border-radius: 6px; font-size: .9em; }
+  .c-prompt { color: #6ee7c8; } .c-flag { color: #ffb14e; } .c-cmd { color: #8ea2ff; } .c-cmt { color: #6b779b; } .c-ok { color: #59d99a; }
+  .c-str { color: #ffb14e; } .c-ty { color: #6ee7c8; } .c-kw { color: #c9a5ff; }
+
+  section { padding: 56px 0; }
+  section.alt { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  h2 { font-size: clamp(1.6rem, 3.4vw, 2.2rem); letter-spacing: -.02em; margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 30px; max-width: 66ch; }
+
+  .grid { display: grid; gap: 18px; }
+  .grid > * { min-width: 0; }
+  .panel pre { max-width: 100%; }
+  .grid.f3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.f2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 860px) { .grid.f3, .grid.f2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+  .card .ic { font-size: 1.5rem; }
+  .card h3 { margin: 12px 0 6px; font-size: 1.1rem; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: .96rem; }
+  .card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: .94rem; }
+  .card ul.cols { columns: 2; column-gap: 32px; margin-top: 12px; }
+  .card ul.cols li { break-inside: avoid; margin-bottom: 4px; }
+  @media (max-width: 860px) { .card ul.cols { columns: 1; } }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .pill { font: 600 .82rem ui-monospace, monospace; padding: 6px 11px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 12%, transparent); border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent); color: var(--fg); }
+
+  .panel { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; }
+  .note { color: var(--muted); font-size: .9rem; margin-top: 10px; }
+
+  table.cmp { width: 100%; border-collapse: collapse; font-size: .94rem; }
+  table.cmp th, table.cmp td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.cmp th { color: var(--muted); font-weight: 700; }
+  table.cmp td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+
+  .viz { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+  .viz h3 { margin: 0 0 2px; font-size: 1.1rem; letter-spacing: -.01em; }
+  .viz .cap { margin: 0 0 14px; color: var(--muted); font-size: .92rem; }
+  .viz svg { display: block; width: 100%; height: auto; }
+  .viz text { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: var(--muted); }
+  .viz text.t { fill: var(--fg); font-weight: 700; font-size: 13px; }
+  .viz text.m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 10px; font-size: .88rem; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+  .key.k1 { background: var(--cell); } .key.k2 { background: var(--fill); } .key.k0 { background: var(--grid); border: 1px solid var(--border); }
+
+  footer { padding: 40px 0 60px; color: var(--muted); border-top: 1px solid var(--border); }
+  .foot-inner { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; }
+  .foot-links { display: flex; gap: 18px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand"><span class="logo">λ</span> xingo-statla</div>
+    <nav class="nav-links">
+      <a class="hide-sm" href="#entry">Entry points</a>
+      <a class="hide-sm" href="#measured">Measured</a>
+      <a class="hide-sm" href="#design">Design</a>
+      <a class="hide-sm" href="#install">Install</a>
+      <a class="hide-sm" href="#verified">Verified</a>
+      <a class="hide-sm" href="#limits">Limitations</a>
+      <a class="hide-sm" href="#credits">Credits</a>
+      <a class="hide-sm" href="api/xingo_statla/">API</a>
+      <a class="btn" href="https://github.com/StrategicProjects/xingo-statla">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">◆ Rust · linear algebra for statistics</span>
+        <h1>Update the fit, <span class="grad">don't start over</span>.</h1>
+        <p class="lead">QR and Cholesky factors updated when a row, a column or a rank-1 term arrives or leaves; randomized and truncated SVDs; ARPACK-style eigensolvers with shift-invert — over any operator you can multiply by. Pure Rust, generic in the scalar, written as a book, deterministic to the bit.</p>
+        <div class="badges">
+          <a href="https://github.com/StrategicProjects/xingo-statla/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/StrategicProjects/xingo-statla/actions/workflows/ci.yml/badge.svg"></a>
+          <a href="https://crates.io/crates/xingo-statla"><img alt="crates.io" src="https://img.shields.io/crates/v/xingo-statla.svg"></a>
+          <a href="https://docs.rs/xingo-statla"><img alt="docs.rs" src="https://docs.rs/xingo-statla/badge.svg"></a>
+          <img alt="MSRV 1.90" src="https://img.shields.io/badge/MSRV-1.90-blue.svg">
+          <img alt="License MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg">
+          <img alt="No unsafe" src="https://img.shields.io/badge/unsafe-forbidden-brightgreen.svg">
+          <!-- TODO(owner): the Zenodo DOI badge, once the first release is archived. -->
+        </div>
+        <div class="cta">
+          <a class="btn primary" href="#install">Get started →</a>
+          <a class="btn" href="api/xingo_statla/">API reference</a>
+          <a class="btn" href="https://github.com/StrategicProjects/xingo-statla">GitHub ★</a>
+        </div>
+      </div>
+      <div class="term" aria-hidden="true">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">README.md</span></div>
+<pre><code><span class="c-cmt">// a sliding window: one row out, one in, O(mn) each</span>
+qr.<span class="c-cmd">delete_row</span>(<span class="c-flag">0</span>)?;
+qr.<span class="c-cmd">insert_row</span>(<span class="c-flag">3</span>, &amp;[<span class="c-flag">1.0</span>, <span class="c-flag">4.0</span>])?;
+qr.<span class="c-cmd">solve_least_squares</span>(&amp;y, &amp;<span class="c-kw">mut</span> beta)?;
+
+<span class="c-cmt">// an indefinite downdate: Err, factor untouched</span>
+assert!(chol.<span class="c-cmd">downdate</span>(&amp;big).<span class="c-cmd">is_err</span>());
+
+<span class="c-cmt">// k eigenvalues of an operator never formed</span>
+<span class="c-kw">let</span> top = <span class="c-cmd">eigsh</span>(&amp;<span class="c-kw">mut</span> t, <span class="c-flag">4</span>,
+    <span class="c-ty">Which</span>::LargestAlgebraic, &amp;opts)?;
+
+<span class="c-cmt">// nearest σ, and how many lie below it</span>
+<span class="c-kw">let</span> (near, below) = <span class="c-cmd">eigsh_near</span>(&amp;a, <span class="c-flag">3</span>, <span class="c-flag">1.0</span>, &amp;opts)?;
+
+<span class="c-prompt">$</span> <span class="c-cmd">cargo</span> test --doc
+test result: <span class="c-ok">ok</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="entry" class="alt">
+    <div class="wrap">
+      <h2>Four entry points, one operator trait</h2>
+      <p class="sub">Not a dense LAPACK and not a statistics package: the factorizations and Krylov methods that statistical computing needs when refitting from scratch is the cost to avoid. Every matrix argument is a <code>LinearOperator</code> — a dense block, a sparse matrix, a closure or your own type.</p>
+      <div class="grid f2">
+        <div class="card"><div class="ic">↻</div><h3>Qr and Cholesky with updates</h3><p>A thin QR with explicit <code>Q</code> and five updates (insert or delete a row or a column, rank-1 <code>A + u vᵀ</code>; Hammarling &amp; Lucas, DGKS reorthogonalization); a Cholesky factor with LINPACK's update and downdate. A failed operation — an indefinite downdate, a dependent column — leaves the factor <strong>bit for bit</strong> as it was.</p></div>
+        <div class="card"><div class="ic">≈</div><h3>rsvd and svds</h3><p>The randomized SVD of Halko, Martinsson &amp; Tropp, reproducible from a seed on every platform; a truncated SVD by thick-restart Golub–Kahan–Lanczos bidiagonalization with full reorthogonalization on both sides, every value within <code>(τ + 8·ncv·u)·σ₁</code> of a singular value.</p></div>
+        <div class="card"><div class="ic">λ</div><h3>eigsh and eigs</h3><p>One Krylov–Schur engine for the symmetric and the general problem, with ARPACK's <code>which</code> vocabulary, convergence test and scipy's defaults; locking of converged Schur blocks; conjugate pairs never split; exactly <code>k</code> values, as scipy returns them.</p></div>
+        <div class="card"><div class="ic">σ</div><h3>Shift-invert</h3><p><code>eigsh_near</code> and <code>eigs_near</code> on <code>(A − σI)⁻¹</code>, factorized by the <code>LBLᵀ</code> or the <code>Lu</code> of <code>xingo-sparse</code>, with one step of iterative refinement per solve; the symmetric driver also returns <strong>how many eigenvalues lie below σ</strong>, from the inertia (Sylvester's law).</p></div>
+      </div>
+      <div class="pills" style="margin-top:22px">
+        <span class="pill">MatRef</span><span class="pill">Qr::insert_row</span><span class="pill">Qr::delete_row</span><span class="pill">Qr::rank1_update</span><span class="pill">Cholesky::downdate</span><span class="pill">LinearOperator</span><span class="pill">from_fn</span><span class="pill">rsvd</span><span class="pill">range_finder</span><span class="pill">svds</span><span class="pill">eigsh</span><span class="pill">eigs</span><span class="pill">eigsh_near</span><span class="pill">count_below</span><span class="pill">StatlaError</span>
+      </div>
+      <p class="note">Generic in the <code>Real</code> trait of <code>xingo-sparse</code>: <code>f64</code> by default, and the double-double of <code>xingo-extprec</code> (about 32 digits) without extra code. The only runtime dependency is <code>xingo-sparse</code>, with no dependency of its own.</p>
+    </div>
+  </section>
+
+  <section id="measured">
+    <div class="wrap">
+      <h2>Stated, then measured</h2>
+      <p class="sub">Each chapter states an acceptance criterion and the tests enforce it. The constants of the bounds were <strong>measured</strong> and fixed with a margin — they are not theorems. The numbers come from the decision log of the solver this crate belongs to.</p>
+      <div class="grid f2" style="align-items:start">
+        <div class="viz">
+          <h3>Worst measured, as a fraction of the criterion</h3>
+          <p class="cap">Each bar is the worst case the tests measured, divided by the bound they enforce (named at the right): backward errors and orthogonality in units of <code>n·u</code> or <code>m·u</code>, residuals in units of <code>ncv·u</code> times the norm, the randomized SVD as the mean over 40 seeds against the expected-error bound of Halko, Martinsson &amp; Tropp.</p>
+          <div class="legend"><span><i class="key k0"></i>criterion</span><span><i class="key k1"></i>worst measured</span></div>
+          <svg viewBox="0 0 600 260" role="img" aria-label="The worst measured value is between 27 and 63 percent of each criterion.">
+            <text x="150" y="28" class="m">0</text>
+            <text x="530" y="28" text-anchor="end" class="m">criterion</text>
+            <text x="142" y="53" text-anchor="end" class="t m">Cholesky bwd</text>
+            <rect x="150" y="40" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="44" width="190.0" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="53" class="m">c_H = 8</text>
+            <text x="142" y="79" text-anchor="end" class="t m">QR orth.</text>
+            <rect x="150" y="66" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="70" width="190.0" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="79" class="m">c_Q = 16</text>
+            <text x="142" y="105" text-anchor="end" class="t m">QR bwd</text>
+            <rect x="150" y="92" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="96" width="128.2" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="105" class="m">c_Q = 16</text>
+            <text x="142" y="131" text-anchor="end" class="t m">rsvd (mean)</text>
+            <rect x="150" y="118" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="122" width="239.4" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="131" class="m">HMT bound</text>
+            <text x="142" y="157" text-anchor="end" class="t m">svds resid.</text>
+            <rect x="150" y="144" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="148" width="109.2" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="157" class="m">c_G = 8</text>
+            <text x="142" y="183" text-anchor="end" class="t m">eigs resid.</text>
+            <rect x="150" y="170" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="174" width="115.9" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="183" class="m">c_K = 8</text>
+            <text x="142" y="209" text-anchor="end" class="t m">shift-inv. resid.</text>
+            <rect x="150" y="196" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="200" width="105.9" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="209" class="m">c_K = 8</text>
+            <text x="142" y="235" text-anchor="end" class="t m">shift-inv. solve</text>
+            <rect x="150" y="222" width="380" height="18" rx="3" fill="var(--grid)"/>
+            <rect x="150" y="226" width="138.7" height="10" rx="2" fill="var(--cell)"/>
+            <text x="536" y="235" class="m">2u</text>
+          </svg>
+          <p class="note">Without the refinement step, the residual of shift-invert reached <code>114·ncv·u</code> and the backward error of a solve <code>526u</code>: far outside the criterion, which is why the step is always on.</p>
+        </div>
+        <div class="viz">
+          <h3>Against the references</h3>
+          <p class="cap">Largest disagreement with an independent answer, where the criterion applies.</p>
+          <div class="scroll">
+            <table class="cmp">
+              <thead><tr><th>What</th><th>Reference</th><th class="num">Criterion</th><th class="num">Worst</th></tr></thead>
+              <tbody>
+                <tr><td><code>svds</code> values</td><td>certified construction</td><td class="num">10⁻¹³ σ₁</td><td class="num">3.6 × 10⁻¹⁵ σ₁</td></tr>
+                <tr><td><code>svds</code> values</td><td>scipy <code>svds</code></td><td class="num">10⁻¹⁰ rel.</td><td class="num">2.0 × 10⁻¹⁵</td></tr>
+                <tr><td><code>eigsh</code>, <code>eigs</code>, shift-invert</td><td>ARPACK (scipy)</td><td class="num">10⁻¹⁰ rel.</td><td class="num">9.2 × 10⁻¹⁴</td></tr>
+                <tr><td><code>count_below</code></td><td>dense count</td><td class="num">equal</td><td class="num">equal</td></tr>
+                <tr><td>windowed regression, 2 000 steps</td><td>refit from scratch</td><td class="num">—</td><td class="num">2.6 × 10⁻¹⁴ (QR)</td></tr>
+                <tr><td><code>svds</code> in double-double</td><td>certified construction</td><td class="num">—</td><td class="num">4 × 10⁻³²</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">The eigenvalue criterion applies where the gap to the rest of the spectrum is at least <code>10⁻⁶‖A‖</code>; the <code>svds</code> one where it is at least <code>10⁻⁸σ₁</code>. The error of <code>svds</code> is absolute: small singular values carry <code>ε σ₁</code>.</p>
+        </div>
+      </div>
+      <div class="grid f3" style="margin-top:18px">
+        <div class="card"><div class="ic">⇄</div><h3>Updates that come back</h3><p><code>update</code> then <code>downdate</code> returns the Cholesky factor to within <code>4.9·n·u</code> at <code>n = 3</code> and <code>0.05·n·u</code> for <code>n ≥ 50</code>, over condition numbers from 10 to 10¹², in <code>f64</code> and double-double.</p></div>
+        <div class="card"><div class="ic">🔒</div><h3>Transactional</h3><p>Every failure of an update is detected before the first write, or computed on copies: the tests compare the factor bit for bit after every error path, in both scalars.</p></div>
+        <div class="card"><div class="ic">🎲</div><h3>Random, reproducibly</h3><p>Starting vectors and sketches come from the crate's own xoshiro256++ and polar method, with a logarithm written in <code>+ − · /</code> (proven to <code>6.4u</code> in <code>f64</code>): a seed gives the same bits everywhere.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="design" class="alt">
+    <div class="wrap">
+      <h2>Written as a book</h2>
+      <p class="sub">Every module is a chapter: purpose, notation, the algorithm in numbered steps, invariants, the measured constants, divergences from the references, references. The crate documentation <em>is</em> the text, every chapter included (docs.rs builds it with the private items, where the chapters live), starting at Chapter 12.</p>
+      <div class="grid f3">
+        <div class="card"><div class="ic">§</div><h3>Invariants that run</h3><p>Each invariant of a chapter is a <code>debug_assert!</code> or a <code>check_invariants()</code>; property-based tests replay them against matrices accumulated in double-double.</p></div>
+        <div class="card"><div class="ic">🧾</div><h3>Deterministic</h3><p>Fixed loop orders, no threads, no <code>libm</code>, no <code>rand</code>: the generator, the Krylov drivers and the small dense solvers are fixed sequences of IEEE operations. The first 64 deviates of seed 0 are pinned by a test.</p></div>
+        <div class="card"><div class="ic">ℝ</div><h3>Generic in the scalar</h3><p>Every algorithm needs only <code>+ − · /</code>, <code>sqrt</code>, <code>abs</code> and the order, so <code>Qr&lt;DoubleDouble&gt;</code> or <code>eigsh</code> in double-double exist without one line of extra code.</p></div>
+        <div class="card"><div class="ic">⚠️</div><h3>Errors, not panics</h3><p>One <code>#[non_exhaustive]</code> <code>StatlaError</code>; no function panics on bad input. Non-convergence is an error unless <code>allow_partial</code> asks for the converged part.</p></div>
+        <div class="card"><div class="ic">🦀</div><h3>No <code>unsafe</code>, no C</h3><p><code>#![forbid(unsafe_code)]</code>. The one dependency, <code>xingo-sparse</code>, is pure Rust; the optional <code>faer</code> feature brings <code>faer</code> (MIT). Nothing GPL or LGPL is used or linked.</p></div>
+        <div class="card"><div class="ic">📄</div><h3>Read, not copied</h3><p>ARPACK, LAPACK and scipy were the references and, through scipy, the test oracle; the code is written from the papers: LINPACK, Saunders, Hammarling–Lucas, DGKS, Halko–Martinsson–Tropp, Golub–Kahan, Baglama–Reichel, Stewart, Francis, Bai–Demmel.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install &amp; run</h2>
+      <p class="sub">Rust 1.90 or later. The README's examples are compiled as doc-tests, so they cannot drift from the API; changes between versions are in the <a href="https://github.com/StrategicProjects/xingo-statla/blob/main/CHANGELOG.md">changelog</a>.</p>
+      <div class="panel" style="margin-bottom:18px">
+<pre><code><span class="c-prompt">$</span> <span class="c-cmd">cargo</span> add xingo-statla
+<span class="c-prompt">$</span> <span class="c-cmd">cargo</span> add xingo-sparse --no-default-features   <span class="c-cmt"># DenseBlock, CscMatrix</span>
+<span class="c-prompt">$</span> <span class="c-cmd">cargo</span> add xingo-statla --features faer        <span class="c-cmt"># FaerDense as the kernel</span></code></pre>
+      </div>
+      <div class="grid f2">
+        <div>
+          <div class="panel">
+<pre><code><span class="c-cmt">// y = 1 + 2 s, the window moves by one observation</span>
+<span class="c-kw">use</span> xingo_statla::{<span class="c-ty">MatRef</span>, <span class="c-ty">Qr</span>, <span class="c-ty">QrOptions</span>};
+
+<span class="c-kw">let</span> x = [<span class="c-flag">1.0</span>, <span class="c-flag">1.0</span>, <span class="c-flag">1.0</span>, <span class="c-flag">1.0</span>, <span class="c-flag">0.0</span>, <span class="c-flag">1.0</span>, <span class="c-flag">2.0</span>, <span class="c-flag">3.0</span>];
+<span class="c-kw">let</span> <span class="c-kw">mut</span> qr = <span class="c-ty">Qr</span>::<span class="c-cmd">factor</span>(
+    <span class="c-ty">MatRef</span>::<span class="c-cmd">new</span>(<span class="c-flag">4</span>, <span class="c-flag">2</span>, <span class="c-flag">4</span>, &amp;x)?, &amp;<span class="c-ty">QrOptions</span>::<span class="c-cmd">default</span>())?;
+qr.<span class="c-cmd">delete_row</span>(<span class="c-flag">0</span>)?;
+qr.<span class="c-cmd">insert_row</span>(<span class="c-flag">3</span>, &amp;[<span class="c-flag">1.0</span>, <span class="c-flag">4.0</span>])?;
+
+<span class="c-kw">let</span> y = [<span class="c-flag">3.0</span>, <span class="c-flag">5.0</span>, <span class="c-flag">7.0</span>, <span class="c-flag">9.0</span>];
+<span class="c-kw">let</span> <span class="c-kw">mut</span> beta = [<span class="c-flag">0.0</span>; <span class="c-flag">2</span>];
+qr.<span class="c-cmd">solve_least_squares</span>(&amp;y, &amp;<span class="c-kw">mut</span> beta)?;   <span class="c-cmt">// (1, 2)</span></code></pre>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+<pre><code><span class="c-cmt">// T = tridiag(−1, 2, −1), stored: 3 nearest σ = 1</span>
+<span class="c-kw">use</span> xingo_statla::{<span class="c-ty">EigsOptions</span>, eigsh_near};
+
+<span class="c-kw">let</span> t = <span class="c-ty">CscMatrix</span>::<span class="c-cmd">from_triplets</span>(n, n, &amp;entries)?;
+<span class="c-kw">let</span> (near, below) =
+    <span class="c-cmd">eigsh_near</span>(&amp;t, <span class="c-flag">3</span>, <span class="c-flag">1.0</span>, &amp;<span class="c-ty">EigsOptions</span>::<span class="c-cmd">default</span>())?;
+assert_eq!(below, <span class="c-flag">33</span>);  <span class="c-cmt">// λ below σ</span>
+<span class="c-cmt">// λ₃₄ ≈ 1.026, λ₃₃ ≈ 0.964, λ₃₅ ≈ 1.088</span>
+
+<span class="c-cmt">// or matrix-free: any closure y ← A x</span>
+<span class="c-kw">let</span> <span class="c-kw">mut</span> op = <span class="c-cmd">from_fn</span>(n, n,
+    |x: &amp;[<span class="c-ty">f64</span>], y: &amp;<span class="c-kw">mut</span> [<span class="c-ty">f64</span>]| { … });
+<span class="c-kw">let</span> top = <span class="c-cmd">eigsh</span>(&amp;<span class="c-kw">mut</span> op, <span class="c-flag">4</span>,
+    <span class="c-ty">Which</span>::LargestAlgebraic, &amp;<span class="c-ty">EigsOptions</span>::<span class="c-cmd">default</span>())?;</code></pre>
+          </div>
+        </div>
+      </div>
+      <p class="note">Two programs ship with the crate: <code>cargo run --release --example accuracy</code> prints the tables behind the constants of the updatable factorizations, and <code>windowed_regression</code> runs 2 000 steps of a sliding-window fit against refitting from scratch.</p>
+    </div>
+  </section>
+
+  <section id="verified" class="alt">
+    <div class="wrap">
+      <h2>How it was verified</h2>
+      <p class="sub">What was checked before 0.1, and against what.</p>
+      <div class="grid f3">
+        <div class="card"><div class="ic">🎯</div><h3>Certified references</h3><p>The matrices a sequence of updates defines are accumulated in double-double; the <code>svds</code> references are built in double-double from prescribed spectra and rounded once, so their singular values are known to <code>u‖A‖_F</code>, and cross-checked by a Jacobi SVD in double-double.</p></div>
+        <div class="card"><div class="ic">📦</div><h3>ARPACK as oracle</h3><p>Six Matrix Market matrices of order 200 to 400 — symmetric and nonsymmetric random, 2-D Laplacian, graded tridiagonal, convection–diffusion, a rectangle — generated by a committed script, with ARPACK's answers from scipy 1.18.1 committed as fixtures. Nothing downloaded.</p></div>
+        <div class="card"><div class="ic">🧬</div><h3>Mutation testing</h3><p>Defects planted on purpose: 7 of 8 caught for the factorizations, 9 of 11 for the SVDs, 13 of 14 for the eigensolvers, and three more planted by the maintainer, all caught. The survivors are named below when they matter.</p></div>
+        <div class="card"><div class="ic">🐞</div><h3>Defects caught</h3><p>The tests found a Jacobi SVD that rotated an underflowed column forever, rotations drifting from orthogonality, a symmetric projection that would not converge near zero with <code>tol = 0</code>, and a loss of orthogonality of <code>u</code> per restart. All fixed before release.</p></div>
+        <div class="card"><div class="ic">ℝ²</div><h3>Two scalars</h3><p>The suite of the updatable factorizations runs in full in <code>f64</code> and in double-double; <code>rsvd</code>, <code>svds</code>, <code>eigsh</code>, <code>eigs</code> and <code>eigsh_near</code> have smoke tests in double-double.</p></div>
+        <div class="card"><div class="ic">💻</div><h3>Platforms</h3><p>The suite ran on macOS aarch64, in debug and release, on stable and on Rust 1.90, and as WebAssembly under wasmtime on the same machine; it was compiled for i686 Linux. The CI of this repository adds x86_64 Linux and Windows, aarch64 Linux, i686, s390x (big-endian, under QEMU) and WebAssembly (wasmtime).</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="limits">
+    <div class="wrap">
+      <h2>Known limitations of 0.1</h2>
+      <p class="sub">What is still open, each in one sentence.</p>
+      <div class="card scroll">
+        <table class="cmp">
+          <tbody>
+            <tr><td>The refinement of shift-invert was not tested with σ very close to an eigenvalue, where one step may not suffice.</td></tr>
+            <tr><td>No matrix above 400 × 400 and no strongly non-normal matrix was tested for the eigensolvers, so the coupling check before locking a Schur block is untested defense code.</td></tr>
+            <tr><td>Interior <code>which</code> without shift-invert (<code>SM</code> on an indefinite matrix, <code>SI</code> on a complex spectrum) may not converge, as with ARPACK; use <code>eigsh_near</code> or <code>eigs_near</code>.</td></tr>
+            <tr><td>Shift-invert of a symmetric matrix factorizes up to twice until <code>xingo-sparse</code> gains an indefinite form (<a href="https://github.com/StrategicProjects/xingo-sparse/issues/8">xingo-sparse#8</a>).</td></tr>
+            <tr><td>Shift-invert keeps a copy of <code>A − σI</code> for the refinement, which doubles the memory of the matrix.</td></tr>
+            <tr><td>The results come from one macOS aarch64 machine only (natively and under wasmtime), until the CI of this repository runs on the other targets.</td></tr>
+            <tr><td>The literature in the chapters is cited from memory, including ARPACK's tie order, which was checked only against scipy's answers.</td></tr>
+            <tr><td>The bound of the generator's logarithm in double-double is measured, not proven (in <code>f64</code> it is proven).</td></tr>
+            <tr><td>The updatable factorizations were tested on random matrices with <code>n ≤ 200</code> only, not on graded or badly scaled ones, and their guard against an underflowing Cholesky diagonal is never reached by a test.</td></tr>
+            <tr><td><code>eigs_near</code> in double-double, <code>svds</code> with both dimensions near 2 000 and the <code>faer</code> kernel beyond one test were not tested.</td></tr>
+            <tr><td>No timing is claimed: nothing was timed on an idle machine.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="credits" class="alt">
+    <div class="wrap">
+      <h2>Authorship, credits and disclaimer</h2>
+      <p class="sub">Who wrote this, whose work it stands on, and what it does not claim.</p>
+      <div class="grid f2">
+        <div class="card"><div class="ic">✍️</div><h3>Authorship</h3><p><code>xingo-statla</code> is written and maintained by <strong>André Leite</strong> as part of the <a href="https://github.com/StrategicProjects/xingo">Xingó</a> project, developed at <a href="https://github.com/StrategicProjects">StrategicProjects</a>. It is developed inside the Xingó monorepo and mirrored, at every release, to <a href="https://github.com/StrategicProjects/xingo-statla">its own repository</a>, where issues and pull requests are welcome. To cite it, use the repository's <code>CITATION.cff</code>.<!-- TODO(owner): add "the Zenodo DOI or", with the concept DOI link, once archived. --></p></div>
+        <div class="card"><div class="ic">⚖️</div><h3>Disclaimer</h3><p>This is an independent project. It is not affiliated with, maintained by or endorsed by the authors of ARPACK, LAPACK, scipy, numpy, <code>faer</code>, RSpectra, <code>irlba</code> or scikit-learn, and includes no code from them (<code>faer</code> is linked only through the optional <code>faer</code> feature). All names and trademarks belong to their owners. The software is provided "as is", without warranty of any kind, under the terms of the MIT and Apache-2.0 licenses.</p></div>
+      </div>
+      <div class="grid" style="margin-top:18px">
+        <div class="card"><div class="ic">🙏</div><h3>Credits</h3><p>The algorithms are those of their authors, implemented here from the published descriptions. Each chapter of the sources lists its references.</p>
+          <ul class="cols">
+            <li><strong>LINPACK</strong> <code>dchud</code>/<code>dchdd</code> (Dongarra, Bunch, Moler &amp; Stewart) and <strong>Saunders</strong> — Cholesky update and downdate</li>
+            <li><strong>Hammarling &amp; Lucas</strong> — updating the QR factorization</li>
+            <li><strong>Daniel, Gragg, Kaufman &amp; Stewart</strong> — Gram–Schmidt with reorthogonalization</li>
+            <li><strong>Halko, Martinsson &amp; Tropp</strong> — the randomized SVD</li>
+            <li><strong>Golub &amp; Kahan</strong> — bidiagonalization</li>
+            <li><strong>Baglama &amp; Reichel</strong> — thick-restart Lanczos bidiagonalization</li>
+            <li><strong>Stewart</strong> — the Krylov–Schur algorithm</li>
+            <li><strong>Francis</strong> — the double-shift QR algorithm</li>
+            <li><strong>Bai &amp; Demmel</strong> — swapping blocks of the real Schur form</li>
+            <li><strong>Hestenes</strong> and <strong>Demmel &amp; Veselić</strong> — Jacobi methods</li>
+            <li><strong>Blackman &amp; Vigna</strong> — xoshiro256++</li>
+            <li><strong>Marsaglia &amp; Bray</strong> — the polar method</li>
+            <li><strong>ARPACK</strong> (Lehoucq, Sorensen &amp; Yang), <strong>LAPACK</strong> and <strong>scipy</strong> — references and, through scipy, the test oracle</li>
+            <li><a href="https://crates.io/crates/xingo-sparse">xingo-sparse</a> — the factorizations of shift-invert; <a href="https://crates.io/crates/xingo-extprec">xingo-extprec</a> — the double-double of the tests</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <div><strong>xingo-statla</strong> · MIT or Apache-2.0 · part of the <a href="https://github.com/StrategicProjects/xingo">Xingó</a> project · © 2026 André Leite · independent project, provided "as is" · <a href="#credits">authorship &amp; credits</a></div>
+    <div class="foot-links">
+      <a href="https://github.com/StrategicProjects/xingo-statla">Repository</a>
+      <a href="https://crates.io/crates/xingo-statla">crates.io</a>
+      <a href="https://docs.rs/xingo-statla">docs.rs</a>
+      <a href="api/xingo_statla/">API reference</a>
+      <a href="https://github.com/StrategicProjects/xingo-statla/blob/main/CHANGELOG.md">Changelog</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
