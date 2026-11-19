@@ -1,6 +1,5 @@
 cff-version: 1.2.0
-message: "If you use xingo-statla, please cite it using these metadata. Each release is archived on Zenodo with its own DOI."
-# TODO(owner): add `doi:` and `identifiers:` (concept DOI and version DOI) once Zenodo has archived the first release, as in xingo-extprec.
+message: "If you use xingo-statla, please cite it using these metadata. The concept DOI below resolves to the latest version; each release has its own DOI on Zenodo."
 type: software
 title: "xingo-statla: updatable and matrix-free linear algebra for statistics"
 abstract: "Updatable and matrix-free linear algebra for statistics in pure Rust: a thin QR with explicit Q and a Cholesky factor updated in place when rows, columns or rank-1 terms arrive or leave, with transactional failures; the randomized SVD of Halko, Martinsson and Tropp with a reproducible generator; a truncated SVD by thick-restart Golub-Kahan-Lanczos bidiagonalization; and ARPACK-style eigsh/eigs by Krylov-Schur restarted Lanczos/Arnoldi, with shift-invert over sparse factorizations and an inertia count. Generic in the scalar type, over a linear-operator trait. Part of the Xingó project."
@@ -12,6 +11,7 @@ license:
   - Apache-2.0
 repository-code: "https://github.com/StrategicProjects/xingo-statla"
 url: "https://strategicprojects.github.io/xingo-statla/"
+doi: 10.5281/zenodo.24382503
 version: 0.1.0
 date-released: 2026-11-19
 keywords:
@@ -25,3 +25,10 @@ keywords:
   - sparse eigenvalues
   - statistics
   - Rust
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24382503
+    description: "Concept DOI (all versions)"
+  - type: doi
+    value: 10.5281/zenodo.24382504
+    description: "Version 0.1.0"

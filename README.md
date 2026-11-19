@@ -4,7 +4,7 @@
 [![docs.rs](https://docs.rs/xingo-statla/badge.svg)](https://docs.rs/xingo-statla)
 ![MSRV 1.90](https://img.shields.io/badge/MSRV-1.90-blue.svg)
 ![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)
-<!-- TODO(owner): the Zenodo DOI badge, once the first release of the mirror is archived. -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24382503.svg)](https://doi.org/10.5281/zenodo.24382503)
 
 **Website:** <https://strategicprojects.github.io/xingo-statla/> (overview, measured accuracy, limitations, API reference).
 
@@ -436,8 +436,9 @@ is a read-only mirror of that directory (`git subtree split`, full
 history), updated at every release; it exists so that the library can be
 archived and cited on its own. Issues and pull requests about the crate are
 welcome in either repository. Each release of the mirror is archived on
-Zenodo, and `CITATION.cff` has the citation metadata.
-<!-- TODO(owner): the concept DOI and the sentence "the concept DOI … always resolves to the latest version", once Zenodo has archived the first release. -->
+Zenodo: the concept DOI [10.5281/zenodo.24382503](https://doi.org/10.5281/zenodo.24382503)
+always resolves to the latest version, each release has its own DOI on its
+release page, and `CITATION.cff` has the citation metadata.
 
 ## Authorship, credits and disclaimer
 
