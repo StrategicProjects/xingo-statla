@@ -52,7 +52,13 @@
 //!     at `i = j`, where `ξ = 0`). If one of them is not finite and
 //!     positive (only an underflow can do that), return
 //!     `DowndateIndefinite` with the margin of C2 — still before any
-//!     write. *An addition of this edition to LINPACK's algorithm.*
+//!     write. *An addition of this edition to LINPACK's algorithm.* Since
+//!     `c_j ≥ α/√(α² + 1) ≈ √margin` and `margin ≥ u` when it is positive,
+//!     only a diagonal entry below about `2⁻¹⁰⁴⁷` (subnormal, or nearly)
+//!     reaches it: the test `downdate_whose_diagonal_underflows_is_refused_
+//!     by_c3_prime` uses `r_ll = 2⁻¹⁰⁶⁰`, `margin = 2⁻⁴⁰`, `c_l ≈ 2⁻¹⁹`
+//!     (without C3′ the downdate returns a zero diagonal; issue
+//!     xingo-statla#6).
 //! C4. \[Apply.\] For each column `j`: `ξ ← 0`; for `i = j, …, 0`: `(r_ij,
 //!     ξ) ← (c_i r_ij − s_i ξ, c_i ξ + s_i r_ij)`.
 //! C5. \[Signs.\] Flip the rows with `r_ii < 0` (none, after C3′; kept as
@@ -109,6 +115,16 @@
 //! D-0132). The measured
 //! values are in `.claude/scratch/l32/l32-tables.md`; the example
 //! `accuracy` regenerates them.
+//!
+//! **Graded and badly scaled matrices** (issue xingo-statla#6). Algorithms
+//! F, U and C only combine entries of one column of `R` (and `x_j`), which
+//! share the scale `d_j` of `A = D A′ D`, so their errors are those of the
+//! equilibrated `A′`. The tests check it for `D` graded or in random order
+//! over up to `10⁴⁰` (`A` over `10⁸⁰`), `n ≤ 120`: (i), (ii) and (iii-a)
+//! measured in the units of `D` (`‖D⁻¹(RᵀR − A_t)D⁻¹‖`, `‖(R̃ − R⋆)D⁻¹‖`),
+//! against `κ(R⋆D⁻¹)²`. Largest ratios on the survey grid (f64): (ii)
+//! `3.0 n u`, (i) `1.8 n u`, (iii-a) `0.31 κ u` — the constants of the
+//! unscaled tests hold unchanged.
 //!
 //! ## References
 //! LINPACK Users' Guide (1979), ch. 10 (`dchud`, `dchdd`); Saunders (1972);

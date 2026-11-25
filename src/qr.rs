@@ -118,6 +118,21 @@
 //! on `5 × 3`, where the refactorization is nearly exact): question
 //! Q-L32-2.
 //!
+//! **Graded and badly scaled matrices** (issue xingo-statla#6), `A = D_r A′
+//! D_c`. The rotations and reflectors act on rows of `R` (and columns of
+//! `Q`), within a column of `R`, so the backward error holds column by
+//! column in the units of `D_c`. Tested: (a) `D_c` over up to `10⁴⁰` and
+//! `D_r` over up to `10⁸`, the five operations, default options; (b) `D_r`
+//! over up to `10⁴⁰`, `insert_row` and `delete_col`, with `rank_tol` at
+//! the underflow threshold — with such row scalings `r_kk/‖a_k‖` falls
+//! below `n ε` and the complement of `range(Q)` lies on the small rows, so
+//! the default options rightly call a new column, or the complement of a
+//! heavy row, dependent (accepting them anyway loses (Q1): measured
+//! `‖QᵀQ − I‖ = 2·10⁻⁵` for `insert_col` with `D_r` over `10²⁷`). Largest
+//! ratios on the survey grid (f64, 1008 runs, none refused): (Q1) `4.2 m
+//! u`, (Q2) by columns `2.0 m u` and normwise `2.0 m u` (both along the
+//! path), (iii-a) `5.2 κ u` against `κ(R⋆D_c⁻¹)²`.
+//!
 //! ## References
 //! Golub & Van Loan (2013), §5.2 (Householder QR), §6.5.1–6.5.3 (updating
 //! the full QR); Hammarling & Lucas, MIMS EPrint 2008.111 (economy

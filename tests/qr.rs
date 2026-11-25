@@ -20,8 +20,8 @@ mod support;
 
 use proptest::prelude::*;
 use support::{
-    QrOp, Rng, Scalar, apply_op, bits, conv, fro, orthogonality, qr_backward, qr_case, to_dd,
-    with_cond,
+    Grading, QrOp, Rng, Scalar, apply_op, bits, conv, fro, orthogonality, qr_backward, qr_case,
+    qr_graded_case, scalings, to_dd, with_cond,
 };
 use xingo_extprec::DoubleDouble as Dd;
 use xingo_statla::{MatRef, Qr, QrOptions, StatlaError};
@@ -100,6 +100,191 @@ proptest! {
     fn one_operation_dd(n in 1usize..=120, extra in 1usize..=20, kappa in log_kappa(), op in op(), seed in any::<u64>()) {
         check_case::<Dd>(n + extra, n, kappa, op, seed)?;
     }
+}
+
+// ------------------------------------------- graded and badly scaled
+
+fn grading() -> impl Strategy<Value = Grading> {
+    prop::sample::select(vec![Grading::Graded, Grading::Random])
+}
+
+/// The rank tolerance of the strongly row-scaled family (see
+/// `check_graded`).
+fn tiny_rank_tol() -> QrOptions {
+    QrOptions {
+        rank_tol: f64::MIN_POSITIVE,
+        ..QrOptions::default()
+    }
+}
+
+/// One graded case (issue xingo-statla#6): `A = D_r A' D_c` with row and
+/// column scalings, one operation whose new data carries the same
+/// scalings. Householder QR and the Givens updates only combine entries
+/// of one column of `R` (rows of `R` are rotated, the scale `d_j` of
+/// column `j` is common), so the backward error holds column by column:
+/// (Q2) in the units of `D_c` — normalized by the norm along the path, as
+/// in `sequence`, because a deleted row can carry most of a column when
+/// the rows are badly scaled — and (Q1). (iii-a) in the units of `D_c`
+/// against `κ(R⋆D_c⁻¹)²`, where the operation did not shrink `A D_c⁻¹`
+/// below half (the forward error after a deletion that cancels is
+/// measured against the norm before it, which (iii-a) does not model).
+///
+/// Two families. *Column-scaled* (any `D_c`, `D_r` of at most 8 decades,
+/// the five operations, default options): a refusal `RankDeficient` is
+/// allowed (the matrix is then numerically rank deficient by the
+/// definition of step F5) and skipped. *Row-scaled* (`D_r` of up to 40
+/// decades): then `r_kk / ‖a_k‖` is of the order of the spread of the
+/// rows, below the default rank test `n ε`, and the complement of the
+/// range of `Q` lies on the small rows — a new column or the complement
+/// of a heavy row is dependent to working precision, and the default
+/// options rightly refuse it. That family runs with the rank test at the
+/// underflow threshold and only the operations that take no rank decision
+/// on a complement vector, `insert_row` and `delete_col`.
+fn check_graded<T: Scalar>(
+    m: usize,
+    n: usize,
+    kappa: f64,
+    op: QrOp,
+    (gr, gc): (f64, f64),
+    (kr, kc): (Grading, Grading),
+    seed: u64,
+) -> Result<Option<(support::QrCase, f64)>, TestCaseError> {
+    let mut rng = Rng::new(seed ^ 0x0d5c);
+    let dr = scalings(&mut rng, m, gr, kr);
+    let dc = scalings(&mut rng, n, gc, kc);
+    let row_scaled = gr > 8.0;
+    let opts = if row_scaled {
+        prop_assert!(matches!(op, QrOp::InsertRow | QrOp::DeleteCol));
+        tiny_rank_tol()
+    } else {
+        QrOptions::default()
+    };
+    let (c, plain) = match qr_graded_case::<T>(m, n, kappa, op, &dr, &dc, &opts, seed) {
+        Ok(v) => v,
+        Err(msg) if !row_scaled && msg.contains("rank deficient") => return Ok(None),
+        Err(msg) => return Err(TestCaseError::fail(msg)),
+    };
+    let mu = c.m as f64 * T::u();
+    let tag = format!(
+        "{} {} rows {kr:?} {gr:.1}, cols {kc:?} {gc:.1}",
+        T::NAME,
+        op.name()
+    );
+    prop_assert!(c.orth <= C_Q * mu, "{tag} (Q1) {:e}", c.orth);
+    prop_assert!(plain <= C_Q * mu, "{tag} (Q2, normwise, path) {plain:e}");
+    prop_assert!(
+        c.bwd_path <= C_Q * mu,
+        "{tag} (Q2, columns, path) {:e}",
+        c.bwd_path
+    );
+    if c.shrink >= 0.5 {
+        prop_assert!(c.bwd <= C_Q * mu, "{tag} (Q2, columns) {:e}", c.bwd);
+        prop_assert!(
+            c.fwd <= C_F * c.kappa * T::u(),
+            "{tag} (iii-a) {:e} > {C_F}·κ·u, κ = {:e}",
+            c.fwd,
+            c.kappa
+        );
+    }
+    Ok(Some((c, plain)))
+}
+
+fn row_op() -> impl Strategy<Value = QrOp> {
+    prop::sample::select(vec![QrOp::InsertRow, QrOp::DeleteCol])
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(support::cases(64)))]
+
+    /// The column-scaled family in `f64`: `n ≤ 100`, `m ≤ n + 30`.
+    #[test]
+    fn graded_columns_f64(
+        n in 1usize..=100, extra in 1usize..=30, kappa in log_kappa(), op in op(),
+        gr in 0.0f64..=8.0, gc in 0.0f64..=40.0, kr in grading(), kc in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<f64>(n + extra, n, kappa, op, (gr, gc), (kr, kc), seed)?;
+    }
+
+    /// The row-scaled family in `f64`.
+    #[test]
+    fn graded_rows_f64(
+        n in 1usize..=100, extra in 1usize..=30, kappa in log_kappa(), op in row_op(),
+        gr in 8.5f64..=40.0, gc in 0.0f64..=40.0, kr in grading(), kc in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<f64>(n + extra, n, kappa, op, (gr, gc), (kr, kc), seed)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(support::cases(16)))]
+
+    /// The column-scaled family in `DoubleDouble`.
+    #[test]
+    fn graded_columns_dd(
+        n in 1usize..=60, extra in 1usize..=15, kappa in log_kappa(), op in op(),
+        gr in 0.0f64..=8.0, gc in 0.0f64..=40.0, kr in grading(), kc in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<Dd>(n + extra, n, kappa, op, (gr, gc), (kr, kc), seed)?;
+    }
+
+    /// The row-scaled family in `DoubleDouble`.
+    #[test]
+    fn graded_rows_dd(
+        n in 1usize..=60, extra in 1usize..=15, kappa in log_kappa(), op in row_op(),
+        gr in 8.5f64..=40.0, gc in 0.0f64..=40.0, kr in grading(), kc in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<Dd>(n + extra, n, kappa, op, (gr, gc), (kr, kc), seed)?;
+    }
+}
+
+/// The survey behind the graded tests (`cargo test --release --test qr --
+/// --nocapture graded_survey`): the largest ratios over fixed seeds,
+/// asserted as in `check_graded`, and the number of refusals.
+#[test]
+fn graded_survey() {
+    let seeds = if cfg!(debug_assertions) { 1 } else { 4 };
+    let (mut o, mut b, mut p, mut f) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let (mut runs, mut refused) = (0, 0);
+    let kinds = [
+        (Grading::Graded, Grading::Graded),
+        (Grading::Random, Grading::Random),
+        (Grading::Graded, Grading::Random),
+    ];
+    for op in QrOp::ALL {
+        let gs: &[(f64, f64)] = if matches!(op, QrOp::InsertRow | QrOp::DeleteCol) {
+            &[(0.0, 20.0), (8.0, 40.0), (20.0, 0.0), (40.0, 40.0)]
+        } else {
+            &[(0.0, 20.0), (8.0, 40.0)]
+        };
+        for &(m, n) in &[(3usize, 2usize), (30, 20), (80, 50)] {
+            for &kappa in &[1e2, 1e8] {
+                for &g in gs {
+                    for k in kinds {
+                        for s in 0..seeds {
+                            runs += 1;
+                            let Some((c, plain)) =
+                                check_graded::<f64>(m, n, kappa, op, g, k, 88_000 + s).unwrap()
+                            else {
+                                refused += 1;
+                                continue;
+                            };
+                            let mu = c.m as f64 * f64::u();
+                            o = o.max(c.orth / mu);
+                            b = b.max(c.bwd_path / mu);
+                            p = p.max(plain / mu);
+                            if c.shrink >= 0.5 {
+                                f = f.max(c.fwd / (c.kappa * f64::u()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "graded QR, f64, {runs} runs, {refused} refused: (Q1) {o:.3} m·u, (Q2, columns) {b:.3} m·u, (Q2, normwise) {p:.3} m·u, (iii-a) {f:.3} κ·u"
+    );
+    assert!(refused * 4 <= runs, "{refused} of {runs} refused");
 }
 
 /// A random sequence of the five operations with `A_t` tracked in

@@ -18,7 +18,10 @@
 mod support;
 
 use proptest::prelude::*;
-use support::{Rng, Scalar, bits, chol_backward, chol_case, conv, rank1_dd, spd, to_dd, unit};
+use support::{
+    Grading, Rng, Scalar, bits, chol_backward, chol_case, chol_graded_case, conv, rank1_dd,
+    scalings, spd, to_dd, unit,
+};
 use xingo_extprec::DoubleDouble as Dd;
 use xingo_statla::{CholOptions, Cholesky, DenseBlock, MatMut, MatRef, NaiveDense, StatlaError};
 
@@ -178,6 +181,182 @@ proptest! {
     fn sequences_dd(n in 1usize..=30, kappa in log_kappa(), seed in any::<u64>(), ops in 1usize..=6) {
         sequence::<Dd>(n, kappa, seed, ops)?;
     }
+}
+
+// ------------------------------------------- graded and badly scaled
+
+/// `g` decades of scaling for the graded families.
+fn decades() -> impl Strategy<Value = f64> {
+    0.0f64..=40.0
+}
+
+fn grading() -> impl Strategy<Value = Grading> {
+    prop::sample::select(vec![Grading::Graded, Grading::Random])
+}
+
+/// One graded case (issue xingo-statla#6): `A = D (A' + x′x′ᵀ) D` with
+/// `D` spanning up to `10⁴⁰` (so `A` spans `10⁸⁰` and `κ(A)` is far beyond
+/// `1/u`), and every criterion of `check_case` measured in the units of
+/// `D`: Algorithms F, U and C only ever combine entries of one column of
+/// `R`, which share the scale `d_j`, so their errors must not depend on
+/// `D` — (ii) and (i) as in `check_case`, (iii-a) against the conditioning
+/// `κ(R⋆D⁻¹)²` of the equilibrated target.
+fn check_graded<T: Scalar>(
+    n: usize,
+    kappa: f64,
+    g: f64,
+    kind: Grading,
+    seed: u64,
+) -> Result<support::CholCase, TestCaseError> {
+    let d = scalings(&mut Rng::new(seed ^ 0x0d5c), n, g, kind);
+    let c = chol_graded_case::<T>(n, kappa, &d, seed).map_err(TestCaseError::fail)?;
+    let u = T::u();
+    let nu = n as f64 * u;
+    let tag = format!("{} {kind:?} g = {g:.1}", T::NAME);
+    prop_assert!(
+        c.bwd_down <= C_H * nu,
+        "{tag} (ii) downdate {:e}",
+        c.bwd_down
+    );
+    prop_assert!(c.bwd_up <= C_H * nu, "{tag} (ii) update {:e}", c.bwd_up);
+    prop_assert!(c.ud <= 10.0 * nu, "{tag} (i) upd∘dd {:e}", c.ud);
+    prop_assert!(c.du <= 10.0 * nu, "{tag} (i) dd∘upd {:e}", c.du);
+    prop_assert!(
+        c.fwd <= C_F * c.kappa * u,
+        "{tag} (iii-a) fwd {:e} > κ·u = {:e}",
+        c.fwd,
+        c.kappa * u
+    );
+    Ok(c)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(support::cases(48)))]
+
+    /// Graded and badly scaled families in `f64`, `n ≤ 120`.
+    #[test]
+    fn graded_downdate_update_f64(
+        n in 1usize..=120, kappa in log_kappa(), g in decades(), kind in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<f64>(n, kappa, g, kind, seed)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(support::cases(12)))]
+
+    /// Graded and badly scaled families in `DoubleDouble`, `n ≤ 60`.
+    #[test]
+    fn graded_downdate_update_dd(
+        n in 1usize..=60, kappa in log_kappa(), g in decades(), kind in grading(), seed in any::<u64>(),
+    ) {
+        check_graded::<Dd>(n, kappa, g, kind, seed)?;
+    }
+}
+
+/// The survey behind the graded tests: the largest ratios over a grid of
+/// fixed seeds (`cargo test --release --test cholesky -- --nocapture
+/// graded_survey`), asserted as in `check_graded`.
+#[test]
+fn graded_survey() {
+    let seeds = if cfg!(debug_assertions) { 2 } else { 8 };
+    let (mut b, mut r, mut f) = (0.0f64, 0.0f64, 0.0f64);
+    for &n in &[2usize, 10, 50] {
+        for &kappa in &[1e2, 1e6, 1e10] {
+            for &g in &[0.0, 8.0, 20.0, 40.0] {
+                for kind in [Grading::Graded, Grading::Random] {
+                    for s in 0..seeds {
+                        let c = check_graded::<f64>(n, kappa, g, kind, 77_000 + s).unwrap();
+                        let nu = n as f64 * f64::u();
+                        b = b.max(c.bwd_down.max(c.bwd_up) / nu);
+                        r = r.max(c.ud.max(c.du) / nu);
+                        f = f.max(c.fwd / (c.kappa * f64::u()));
+                    }
+                }
+            }
+        }
+    }
+    println!("graded Cholesky, f64: (ii) {b:.3} n·u, (i) {r:.3} n·u, (iii-a) {f:.3} κ·u");
+}
+
+/// Step C3′ (the new diagonal `c_j r_jj` underflows to zero) is reached by
+/// a graded factor whose last diagonal entry is subnormal, `r_ll = 2⁻¹⁰⁶⁰`,
+/// and a downdate whose rotation at `l` has `c_l ≈ 2√margin ≈ 2⁻¹⁹`:
+/// `c_l r_ll ≈ 2⁻¹⁰⁷⁹` rounds to zero although `1 − ‖a‖² = 2⁻⁴⁰ > 0`
+/// passed step C2. The downdate must fail with the margin of C2 and leave
+/// `R` bit for bit (H3); without C3′ it would return a factor with a zero
+/// diagonal (and fail (H1) in debug builds).
+/// `2ᵏ` exactly, subnormal included (`powi` may form `2^{−k}` first and
+/// overflow to a zero result in debug builds).
+fn pow2(k: i32) -> f64 {
+    if k >= -1022 {
+        f64::from_bits(u64::try_from(k + 1023).unwrap() << 52)
+    } else {
+        f64::from_bits(1u64 << u32::try_from(k + 1074).unwrap())
+    }
+}
+
+fn c3_prime<T: Scalar>(n: usize, binades_per_col: i32) {
+    // R = R′ D: R′ the factor of a well-conditioned SPD matrix with its
+    // last column replaced by e_l, D = diag(2^{−k j}) for j < l and
+    // r_ll = 2⁻¹⁰⁶⁰.
+    let l = n - 1;
+    let (_, base) = spd_factor(n, 10.0, 3);
+    let rb = base.upper().to_block();
+    let mut r = DenseBlock::zeros(n, n);
+    for j in 0..l {
+        let dj = pow2(-binades_per_col * i32::try_from(j).unwrap());
+        for i in 0..=j {
+            r.data[i + j * n] = T::from_f64(rb.data[i + j * n] * dj);
+        }
+    }
+    r.data[l + l * n] = T::from_f64(pow2(-1060));
+    let c = Cholesky::from_upper(r, NaiveDense, &CholOptions::default()).unwrap();
+    // a = (a′, 1/2) with ‖a′‖² = 3/4 − 2⁻⁴⁰; x = Rᵀa. Column l of R is
+    // r_ll e_l, so x_l = r_ll/2 = 2⁻¹⁰⁶¹ exactly and C1 returns a_l = 1/2.
+    let mut rng = Rng::new(11);
+    let s = (0.75f64 - 2f64.powi(-40)).sqrt();
+    let ap: Vec<f64> = unit(&mut rng, l).iter().map(|v| v * s).collect();
+    let mut x = vec![T::ZERO; n];
+    let rt = c.upper().to_block();
+    for j in 0..l {
+        let mut v = T::ZERO;
+        for i in 0..=j {
+            v += rt.data[i + j * n] * T::from_f64(ap[i]);
+        }
+        x[j] = v;
+    }
+    x[l] = T::from_f64(pow2(-1061));
+    let before = bits(&c.upper().to_block().data);
+    let mut c1 = c.clone();
+    match c1.downdate(&x) {
+        Err(StatlaError::DowndateIndefinite { margin }) => {
+            // The margin of C2, positive: it is C3′ that refused.
+            assert!(
+                margin > 0.0 && margin < 1e-9,
+                "{} margin {margin:e}",
+                T::NAME
+            );
+        }
+        other => panic!("{} n = {n}: expected C3′ to refuse, got {other:?}", T::NAME),
+    }
+    assert_eq!(bits(&c1.upper().to_block().data), before, "(H3)");
+    // The same downdate with r_ll = 2⁻¹⁰⁰⁰ (no underflow) succeeds.
+    let mut r2 = c.upper().to_block();
+    r2.data[l + l * n] = T::from_f64(pow2(-1000));
+    let mut c2 = Cholesky::from_upper(r2, NaiveDense, &CholOptions::default()).unwrap();
+    x[l] = T::from_f64(pow2(-1001));
+    let info = c2.downdate(&x).unwrap();
+    assert!(info.margin > 0.0 && info.margin < 1e-9);
+    assert_eq!(c2.check_invariants(), Ok(()));
+}
+
+#[test]
+fn downdate_whose_diagonal_underflows_is_refused_by_c3_prime() {
+    c3_prime::<f64>(2, 0);
+    c3_prime::<f64>(8, 60);
+    c3_prime::<Dd>(2, 0);
+    c3_prime::<Dd>(8, 60);
 }
 
 /// Criterion (iii) as the pilot s01 measured it, in aggregate and at the

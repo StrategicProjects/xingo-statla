@@ -652,7 +652,18 @@ pub fn exact_chol<T: Scalar>(at: &[Dd], n: usize) -> Option<DenseBlock<T>> {
 /// The `R` of the Householder QR of `A_t` computed in double-double,
 /// rounded to `T`.
 pub fn exact_qr_r<T: Scalar>(at: &[Dd], m: usize, n: usize) -> Option<DenseBlock<T>> {
-    let f = Qr::<Dd>::factor(MatRef::new(m, n, m, at).ok()?, &QrOptions::default()).ok()?;
+    exact_qr_r_with::<T>(at, m, n, &QrOptions::default())
+}
+
+/// [`exact_qr_r`] with the options `opts` (the graded families need a
+/// rank tolerance below the default `n ε`).
+pub fn exact_qr_r_with<T: Scalar>(
+    at: &[Dd],
+    m: usize,
+    n: usize,
+    opts: &QrOptions,
+) -> Option<DenseBlock<T>> {
+    let f = Qr::<Dd>::factor(MatRef::new(m, n, m, at).ok()?, opts).ok()?;
     let b = f.r().to_block();
     Some(DenseBlock {
         rows: n,
@@ -713,4 +724,318 @@ pub fn cases(default: u32) -> u32 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
+}
+
+// ------------------------------------------- graded and badly scaled data
+
+/// How the scalings of a graded family are laid out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grading {
+    /// `d_i = 10^{−g i/(n−1)}`: monotonically graded, largest first.
+    Graded,
+    /// `d_i = 10^{g (t_i − 1/2)}`, `t_i` uniform in `[0, 1)`: badly scaled
+    /// in a random order.
+    Random,
+}
+
+/// `n` scale factors spanning `g` decades (Chapter 12.2, 12.3 acceptance,
+/// issue xingo-statla#6). The factors are `f64` values; the scaled matrices
+/// are formed from them and rounded, and every reference is computed from
+/// the rounded matrix, so the factors need not be exact.
+pub fn scalings(rng: &mut Rng, n: usize, decades: f64, kind: Grading) -> Vec<f64> {
+    (0..n)
+        .map(|i| match kind {
+            Grading::Graded => {
+                if n == 1 {
+                    1.0
+                } else {
+                    10f64.powf(-decades * i as f64 / (n - 1) as f64)
+                }
+            }
+            Grading::Random => 10f64.powf(decades * (rng.uniform() - 0.5)),
+        })
+        .collect()
+}
+
+/// `‖(X − Y) D⁻¹‖_F / ‖Y D⁻¹‖_F` for `n_r × n_c` blocks (column-major) and
+/// column scalings `d`, in double-double: the error measured in the units
+/// of each column.
+pub fn rel_cols<T: Scalar>(x: &[T], y: &[T], rows: usize, d: &[f64]) -> f64 {
+    let mut num = Vec::with_capacity(x.len());
+    let mut den = Vec::with_capacity(x.len());
+    for (j, &dj) in d.iter().enumerate() {
+        let s = Dd::ONE / Dd::from_f64(dj);
+        for i in 0..rows {
+            let (a, b) = (x[i + j * rows].dd(), y[i + j * rows].dd());
+            num.push((a - b) * s);
+            den.push(b * s);
+        }
+    }
+    fro(&num) / fro(&den).max(f64::MIN_POSITIVE)
+}
+
+/// `R D⁻¹` in `f64` (the column-equilibrated factor, for the κ estimate).
+pub fn unscale_cols<T: Scalar>(r: &DenseBlock<T>, d: &[f64]) -> DenseBlock<f64> {
+    let n = r.rows;
+    let mut data = vec![0.0; r.data.len()];
+    for (j, &dj) in d.iter().enumerate() {
+        for i in 0..n {
+            data[i + j * n] = (r.data[i + j * n].dd() / Dd::from_f64(dj)).to_f64();
+        }
+    }
+    DenseBlock {
+        rows: n,
+        cols: r.cols,
+        data,
+    }
+}
+
+/// `‖D⁻¹(RᵀR − A_t)D⁻¹‖_F / ‖D⁻¹A_tD⁻¹‖_F`: (H2) in the units of the
+/// scaling, the backward error a scaling-invariant algorithm must keep.
+pub fn chol_backward_scaled<T: Scalar>(c: &Cholesky<T>, at: &[Dd], d: &[f64]) -> f64 {
+    let n = c.n();
+    let g = gram(&c.upper().to_block());
+    let mut num = Vec::with_capacity(n * n);
+    let mut den = Vec::with_capacity(n * n);
+    for j in 0..n {
+        for i in 0..n {
+            let s = Dd::ONE / (Dd::from_f64(d[i]) * Dd::from_f64(d[j]));
+            num.push((g[i + j * n] - at[i + j * n]) * s);
+            den.push(at[i + j * n] * s);
+        }
+    }
+    fro(&num) / fro(&den)
+}
+
+/// One graded downdate/update case of Chapter 12.2: `A' ` as in
+/// [`chol_case`], `A = fl(D (A' + x′x′ᵀ) D)` with the scalings `d` and `x =
+/// fl(D x′)`; `A` factored, downdated by `x` and updated back, and updated
+/// by `x` and downdated back. Every error is measured in the units of `D`
+/// (the scaled backward errors, [`rel_cols`] for the factors); the forward
+/// error is against `R⋆`, the factor of the target `A − xxᵀ` computed in
+/// double-double, and `kappa` is a lower estimate of `κ(R⋆D⁻¹)²`, the
+/// conditioning of the equilibrated target.
+pub fn chol_graded_case<T: Scalar>(
+    n: usize,
+    kappa: f64,
+    d: &[f64],
+    seed: u64,
+) -> Result<CholCase, String> {
+    let ap = spd(n, kappa, seed);
+    let mut rng = Rng::new(seed ^ 0x5eed_0fc0_ffee);
+    let xp = unit(&mut rng, n);
+    let x: Vec<f64> = xp.iter().zip(d).map(|(v, s)| v * s).collect();
+    let mut a = vec![0.0; n * n];
+    for j in 0..n {
+        for i in 0..=j {
+            a[i + j * n] = d[i] * (ap[i + j * n] + xp[i] * xp[j]) * d[j];
+        }
+    }
+    symmetrize(&mut a, n);
+    let at0: Vec<T> = conv(&a);
+    let ad = to_dd(&at0);
+    let xt: Vec<T> = conv(&x);
+    let xd = to_dd(&x);
+    let r0 = Cholesky::factor(MatRef::new(n, n, n, &at0).unwrap(), &CholOptions::default())
+        .map_err(|e| format!("factor: {e}"))?;
+    let r0b = r0.upper().to_block();
+    // Downdate.
+    let mut c1 = r0.clone();
+    let info = c1.downdate(&xt).map_err(|e| format!("downdate: {e}"))?;
+    c1.check_invariants().map_err(str::to_string)?;
+    let mut at = ad.clone();
+    rank1_dd(&mut at, n, &xd, -1.0);
+    let bwd_down = chol_backward_scaled(&c1, &at, d);
+    let rstar = exact_chol::<T>(&at, n).ok_or("exact refactorization failed")?;
+    let fwd = rel_cols(&c1.upper().to_block().data, &rstar.data, n, d);
+    let kappa_est = kappa_of_upper(&unscale_cols(&rstar, d));
+    // Round trip update∘downdate.
+    c1.update(&xt).map_err(|e| format!("update: {e}"))?;
+    let ud = rel_cols(&c1.upper().to_block().data, &r0b.data, n, d);
+    // Update, then downdate∘update.
+    let mut c2 = r0.clone();
+    c2.update(&xt).map_err(|e| format!("update: {e}"))?;
+    c2.check_invariants().map_err(str::to_string)?;
+    let mut au = ad.clone();
+    rank1_dd(&mut au, n, &xd, 1.0);
+    let bwd_up = chol_backward_scaled(&c2, &au, d);
+    c2.downdate(&xt)
+        .map_err(|e| format!("downdate after update: {e}"))?;
+    let du = rel_cols(&c2.upper().to_block().data, &r0b.data, n, d);
+    Ok(CholCase {
+        kappa: kappa_est,
+        bwd_down,
+        bwd_up,
+        fwd,
+        dist: f64::NAN,
+        ud,
+        du,
+        margin: info.margin,
+    })
+}
+
+/// One graded QR case (issue xingo-statla#6): `A = D_r A' D_c` with `A'`
+/// as in [`qr_case`] and row and column scalings `dr`, `dc`; one operation
+/// whose new data carries the same scalings (a new row `w = D_c w′ ·
+/// s`, a new column `c = D_r c′ · s` with its own scale `s`, `A + (D_r
+/// u′)(D_c v′)ᵀ`). Returned: [`QrCase`] with `bwd`, `bwd_path` and `fwd`
+/// measured in the units of the column scaling (`‖(QR − A_t) D_c⁻¹‖`,
+/// [`rel_cols`]), `kappa` a lower estimate of `κ(R⋆D_c⁻¹)²`, and the
+/// normwise `‖QR − A_t‖_F / max(‖A‖_F, ‖A_t‖_F)` as the second value.
+/// `opts` are those of the factorization (and of the reference `R⋆`).
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one case, spelled out
+pub fn qr_graded_case<T: Scalar>(
+    m: usize,
+    n: usize,
+    kappa: f64,
+    op: QrOp,
+    dr: &[f64],
+    dc: &[f64],
+    opts: &QrOptions,
+    seed: u64,
+) -> Result<(QrCase, f64), String> {
+    let ap = with_cond(m, n, kappa.sqrt(), seed);
+    let mut a = vec![0.0; m * n];
+    for j in 0..n {
+        for i in 0..m {
+            a[i + j * m] = dr[i] * ap[i + j * m] * dc[j];
+        }
+    }
+    let mut f = Qr::factor(MatRef::new(m, n, m, &conv::<T>(&a)).unwrap(), opts)
+        .map_err(|e| format!("factor: {e}"))?;
+    let mut at = to_dd(&a);
+    let mut dr = dr.to_vec();
+    let mut dc = dc.to_vec();
+    let mut rng = Rng::new(seed ^ 0x00dd_ba11);
+    // ‖A D_c⁻¹‖_F before the operation, and ‖A‖_F.
+    let cols_norm = |at: &[Dd], rows: usize, dc: &[f64]| {
+        let v: Vec<Dd> = (0..at.len())
+            .map(|k| at[k] / Dd::from_f64(dc[k / rows]))
+            .collect();
+        fro(&v)
+    };
+    let before = cols_norm(&at, m, &dc);
+    let before_plain = fro(&at);
+    // A scale for a new row or column, within the range of the others.
+    let pick = |rng: &mut Rng, d: &[f64]| d[rng.below(d.len().max(1))];
+    match op {
+        QrOp::InsertRow => {
+            let i = rng.below(m + 1);
+            let s = if m == 0 { 1.0 } else { pick(&mut rng, &dr) };
+            let w: Vec<f64> = rng
+                .gauss_vec(n)
+                .iter()
+                .zip(&dc)
+                .map(|(v, d)| v * d * s / (n.max(1) as f64).sqrt())
+                .collect();
+            f.insert_row(i, &conv::<T>(&w))
+                .map_err(|e| format!("insert_row: {e}"))?;
+            let mut b = vec![Dd::ZERO; (m + 1) * n];
+            for j in 0..n {
+                for r in 0..=m {
+                    b[r + j * (m + 1)] = match r.cmp(&i) {
+                        std::cmp::Ordering::Less => at[r + j * m],
+                        std::cmp::Ordering::Equal => Dd::from_f64(w[j]),
+                        std::cmp::Ordering::Greater => at[r - 1 + j * m],
+                    };
+                }
+            }
+            at = b;
+            dr.insert(i, s);
+        }
+        QrOp::DeleteRow => {
+            let i = rng.below(m);
+            f.delete_row(i).map_err(|e| format!("delete_row: {e}"))?;
+            let mut b = Vec::with_capacity((m - 1) * n);
+            for j in 0..n {
+                for r in 0..m {
+                    if r != i {
+                        b.push(at[r + j * m]);
+                    }
+                }
+            }
+            at = b;
+            dr.remove(i);
+        }
+        QrOp::InsertCol => {
+            let j = rng.below(n + 1);
+            let s = if n == 0 { 1.0 } else { pick(&mut rng, &dc) };
+            let c: Vec<f64> = unit(&mut rng, m)
+                .iter()
+                .zip(&dr)
+                .map(|(v, d)| v * d * s)
+                .collect();
+            f.insert_col(j, &conv::<T>(&c))
+                .map_err(|e| format!("insert_col: {e}"))?;
+            let mut b = at[..j * m].to_vec();
+            b.extend(c.iter().map(|&v| Dd::from_f64(v)));
+            b.extend_from_slice(&at[j * m..]);
+            at = b;
+            dc.insert(j, s);
+        }
+        QrOp::DeleteCol => {
+            let j = rng.below(n);
+            f.delete_col(j).map_err(|e| format!("delete_col: {e}"))?;
+            at.drain(j * m..(j + 1) * m);
+            dc.remove(j);
+        }
+        QrOp::Rank1 => {
+            let u: Vec<f64> = unit(&mut rng, m)
+                .iter()
+                .zip(&dr)
+                .map(|(v, d)| v * d)
+                .collect();
+            let v: Vec<f64> = unit(&mut rng, n)
+                .iter()
+                .zip(&dc)
+                .map(|(x, d)| 0.5 * x * d)
+                .collect();
+            f.rank1_update(&conv::<T>(&u), &conv::<T>(&v))
+                .map_err(|e| format!("rank1_update: {e}"))?;
+            for j in 0..n {
+                for i in 0..m {
+                    at[i + j * m] += Dd::from_f64(u[i]) * Dd::from_f64(v[j]);
+                }
+            }
+        }
+    }
+    let (m, n) = (f.nrows(), f.ncols());
+    let orth = orthogonality(f.q());
+    // QR − A_t in double-double.
+    let q = to_dd(&f.q().to_block().data);
+    let r = to_dd(&f.r().to_block().data);
+    let mut res = vec![Dd::ZERO; m * n];
+    for j in 0..n {
+        for k in 0..=j {
+            let rkj = r[k + j * n];
+            for i in 0..m {
+                res[i + j * m] += q[i + k * m] * rkj;
+            }
+        }
+        for i in 0..m {
+            res[i + j * m] -= at[i + j * m];
+        }
+    }
+    let after = cols_norm(&at, m, &dc);
+    let path = before.max(after);
+    let num = cols_norm(&res, m, &dc);
+    let bwd = num / after.max(f64::MIN_POSITIVE);
+    let bwd_path = num / path.max(f64::MIN_POSITIVE);
+    let plain = fro(&res) / before_plain.max(fro(&at)).max(f64::MIN_POSITIVE);
+    let rstar = exact_qr_r_with::<T>(&at, m, n, opts).ok_or("exact refactorization failed")?;
+    let fwd = rel_cols(&f.r().to_block().data, &rstar.data, n, &dc);
+    let kappa = kappa_of_upper(&unscale_cols(&rstar, &dc));
+    Ok((
+        QrCase {
+            kappa,
+            orth,
+            bwd,
+            bwd_path,
+            shrink: after / path.max(f64::MIN_POSITIVE),
+            fwd,
+            dist: f64::NAN,
+            m,
+        },
+        plain,
+    ))
 }
