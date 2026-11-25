@@ -86,6 +86,44 @@
 //! `A` satisfies the criterion of `eigsh`/`eigs`, `≤ (τ + c_K·ncv·u)‖A‖`, on
 //! every fixture.
 //!
+//! *σ near an eigenvalue* (issue xingo-statla#1; `tests/near_shift.rs`).
+//! Measured on tridiagonal matrices of order 201 with the eigenvalue `λ⋆ =
+//! 2` exact in `f64` (the 1-D Laplacian, and a nonnormal convection–
+//! diffusion operator whose eigenvector matrix has condition `≈ 5·10²`),
+//! permuted, with `σ = 2 ± δ`, `δ` from `2⁻¹` down to one ulp:
+//!
+//! 1. *`LBLᵀ` (`eigsh_near`).* Accepted down to one ulp, refused (zero
+//!    pivot, [`StatlaError::Kkt`]) only at `σ = λ⋆`; `η ≤ 1.3u` at every
+//!    accepted `σ` after Algorithm R. A second refinement step changes
+//!    nothing (`η ≤ 1.2u` after it). The value nearest `σ` comes out
+//!    *exact* and its pair meets the residual criterion of 12.6 at every
+//!    distance.
+//! 2. *Threshold LU (`eigs_near`).* `LuOptions::for_scalar` has an
+//!    *absolute* pivot tolerance (`τ_abs = 10⁻¹⁰`): `A − σI` is accepted
+//!    down to `δ = 2⁻³⁶ ≈ 1.5·10⁻¹¹` (`η ≤ 1.4u`, `λ⋆` exact) and refused
+//!    ([`StatlaError::Lu`], "singular") from `2⁻⁴⁰` on. Below that point
+//!    one step is *not* enough: with `τ_abs = 0` the LU accepts `σ` down
+//!    to one ulp, and `η` reaches `3.9·10³ u` at `δ = 2⁻⁴⁰` (`2.4·10² u`
+//!    at `2⁻⁴⁴`), and a second step does not lower it (its correction is
+//!    `10⁴` times `y`): fixed-precision refinement converges only while
+//!    `γ κ(M) u` is small. So the documented error of the defaults is the
+//!    right answer there, not a second step nor a stopping test on the
+//!    correction — which would only detect the failure the refusal
+//!    already reports. (Because `τ_abs` is absolute, `eigs_near` also
+//!    refuses *every* shift of a matrix scaled by `2⁻⁴⁰`; with
+//!    `TolScale::Column` it behaves as the unscaled one, with the same
+//!    refusals. A question for the defaults, task I01.)
+//! 3. *The other pairs.* The `k − 1` pairs farther from `σ` lose accuracy
+//!    as `σ` approaches `λ⋆`, whatever the solve: the Krylov process on
+//!    `M⁻¹` rounds at the level `u·|ν₁|`, `ν₁ = 1/(λ⋆ − σ)`, so pair `i`
+//!    has `‖A y − θ y‖ ≲ (τ + c_K·ncv·u·a_i)‖A‖` with the *amplification*
+//!    `a_i = |θ_i − σ|/|θ_1 − σ|` (measured: `≤ 0.1·c_K·a_i` in the
+//!    criterion's units, `a_i` up to `1.5·10¹⁴` at one ulp, where the
+//!    other values of the Laplacian are still correct to `2·10⁻⁶‖A‖`).
+//!    That is the price of shift-invert itself (ARPACK's mode 3 has it
+//!    too); `σ` should be put near the wanted values, not on one of them,
+//!    when several are wanted to full accuracy.
+//!
 //! *Cost.* Per application one more solve and one sparse product with `M`
 //! (`2·nnz(M)` flops; the solves dominate), and the `n`-vectors `r`, `d`
 //! kept in the operator; the stored `M` doubles the matrix memory.
