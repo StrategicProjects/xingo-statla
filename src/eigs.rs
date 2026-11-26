@@ -146,7 +146,8 @@
 //! `c_K(1 + √R/8) = 8 + √R` by `eigs` on a clustered spectrum (`102.9`
 //! against `62.8`), `c_K(1 + √R/4) = 8 + 2√R` by `eigsh` on an indefinite
 //! tridiagonal (`125.5` against `117.2`). After hundreds of restarts a
-//! caller that needs the residual should recompute it. Measured in `f64`,
+//! caller that needs the residual should recompute it, and Lemma R below
+//! bounds the recomputed value whatever `R`. Measured in `f64`,
 //! ratio `(‖r‖/‖A‖ − τ)/(m u)` against `√(‖A‖₁‖A‖_∞)`, the worst returned
 //! pair (`allow_partial` where fewer than `k` converged, marked `*`):
 //!
@@ -213,6 +214,72 @@
 //! recomputing `T_A = Z_Aᵀ H_AA Z_A` in double-double after RO lowers it by
 //! about a tenth. Near-normal matrices converge in few restarts, which
 //! is why the fixtures stay below `2.44`.
+//!
+//! *Why `eigsh` grows faster than `eigs`* (issue xingo-statla#10, task I03;
+//! measured along the runs in `f64`, `‖A V − V H̄‖_F/‖A‖_est` over the kept
+//! columns after each restart, in units of `u`; 1-D Laplacian of order
+//! 2000 and the indefinite tridiagonal of order 1000, `LM`, `k = 10`,
+//! `m = 24`). In `eigs` the relation error grows like `√R`; in `eigsh` it
+//! grows about **linearly**, and the final ratio of criterion (b) is three
+//! times larger on the same matrix:
+//!
+//! | run | (K2) at `R` = 100 / 300 / 600 / 900 | `R` | ratio |
+//! |---|---|---:|---:|
+//! | `eigs`, Laplacian | 499 / 743 / 967 / 1168 | 1271 | 13.8 |
+//! | `eigsh`, Laplacian | 268 / 778 / 1937 / 3240 | 1221 | 48.6 |
+//! | `eigsh` with HR + FQ in KS3, Laplacian | 504 / 975 / 1111 / 1128 | 1275 | 17.6 |
+//! | `eigs`, indefinite | 339 / 707 / 1020 / 1084 | 983 | 21.9 |
+//! | `eigsh`, indefinite | 226 / 864 / 2058 / — | 880 | 36.7 |
+//! | `eigsh` with HR + FQ in KS3, indefinite | 348 / 603 / 847 / 1086 | 926 | 15.0 |
+//!
+//! The source is the symmetric small solver of KS3 (Algorithm SJ, `T_A`
+//! diagonal, the reordering a permutation): with the Hessenberg reduction
+//! and Francis QR of `eigs` on the *same* symmetric `H` (the rest of the
+//! symmetric engine unchanged) the growth is that of `eigs`. It is not the
+//! size of the error SJ commits — its backward error per restart,
+//! `‖H_AA Z_A − Z_A T_A‖_F`, is `≈ 5u‖H_AA‖_F` against `≈ 9u` for FQ, and
+//! `‖Z_AᵀZ_A − I‖_F ≈ 50u` in both — but its direction: on the nearly
+//! diagonal arrowhead of a restart SJ makes few, small rotations, `Z_A`
+//! stays close to a permutation, and the error of each restart is added
+//! to the same kept columns, coherently, where the Householder reflectors
+//! of HR mix them as a random walk. These do *not* change the growth:
+//! keeping the Gram–Schmidt coefficients instead of the mirror of KS2′
+//! (`48.2`; SJ symmetrizes them), a Jacobi threshold `2⁻¹⁰` or `2⁻²⁶`
+//! times smaller (`42.0`, with more restarts), replacing the values of SJ
+//! by the Rayleigh quotients `z_iᵀ H_AA z_i` (`51.9`). Using HR + FQ in
+//! `eigsh` changes its results and its number of restarts, so it is a
+//! proposal (task I03), not a change of this edition.
+//!
+//! *Lemma R (a posteriori residual; no dependence on `R`).* Let `(θ, y)` be
+//! a returned pair, `‖y‖ = 1`, `θ = a + ib` and `y = y_r + i y_i` (`b = 0`,
+//! `y_i = 0` for a real value). Suppose each application returns `ŵ =
+//! fl(A x) = A x + δ` with `‖δ‖ ≤ η_op‖x‖` (for a sparse matrix with at
+//! most `c` entries per row, summed in order, `|δ| ≤ γ_c |A||x|`, so `η_op
+//! ≤ γ_c √(‖A‖₁‖A‖_∞)`; `γ_c = c u/(1 − c u)`). Compute `r̂_r =
+//! fl(ŵ_r − a y_r + b y_i)` and `r̂_i = fl(ŵ_i − a y_i − b y_r)` entry by
+//! entry (`ŵ_r = fl(A y_r)`, `ŵ_i = fl(A y_i)`; two products and two
+//! sums each) and `ρ̂ = fl(‖(r̂_r, r̂_i)‖₂)`. Then
+//!
+//! ```text
+//! ‖A y − θ y‖ ≤ (1 + γ_{2n+1}) ρ̂ + γ_3 (‖ŵ‖ + √2 |θ|) + η_op .
+//! ```
+//!
+//! *Proof.* Entrywise, `r̂ = (ŵ − θ y) + e` with `|e| ≤ γ_3(|ŵ| + |a||y|
+//! + |b||y|)` (each entry is a sum of three terms, two of them products,
+//! each operation rounded once: the standard model and the bound for
+//! sums of products of Higham, *Accuracy and Stability*, ch. 3), so `‖e‖ ≤
+//! γ_3(‖ŵ‖ + (|a| + |b|)‖y‖) ≤ γ_3(‖ŵ‖ + √2|θ|)`. `A y − θ y = (ŵ − θ y)
+//! − δ_c`, `δ_c = (δ_r, δ_i)` with `‖δ_c‖² ≤ η_op²(‖y_r‖² + ‖y_i‖²) =
+//! η_op²`. Finally, for `ρ̂` computed as the rounded square root of a sum
+//! of `2n` squares accumulated in order, `‖r̂‖ ≤ (1 + γ_{2n+1})ρ̂`. The
+//! triangle inequality gives the bound. ∎
+//!
+//! The bound costs one application per real pair and two per complex one,
+//! and its rounding terms are `O((n + c)u‖A‖)` whatever the number of
+//! restarts: it certifies a returned pair after any run, where (K2) gives
+//! no closed form. The drivers do not compute it (it would change the
+//! number of applications, [`EigsStats::applies`]); how to offer it is
+//! issue xingo-statla#10's open decision.
 //!
 //! ## Acceptance (L3.4, S9; tests/eigs.rs)
 //! On Matrix Market matrices the `k` wanted eigenvalues agree with
@@ -1259,7 +1326,9 @@ impl<T: Real> Engine<T> {
 /// every pair has `‖Ay − θy‖ ≤ (tol + c_K·ncv·u) ‖A‖` (`c_K = 8`), measured
 /// on runs of few restarts. Long runs (hundreds of restarts, see
 /// [`EigsStats::restarts`]) exceed it, and no form in the number of
-/// restarts bounds every measured run: Chapter 12.6, "Long runs".
+/// restarts bounds every measured run: Chapter 12.6, "Long runs". A
+/// residual recomputed by the caller (`‖A y − θ y‖`, one application per
+/// pair) is bounded, whatever the number of restarts, by Lemma R there.
 ///
 /// # Errors
 /// [`StatlaError::InvalidArgument`] (not square; `which` not symmetric; `k
@@ -1301,7 +1370,7 @@ fn sym_result<T: Real>(raw: Raw<T>) -> SymEigen<T> {
 /// c_K·ncv·u)‖A‖` (`c_K = 8`), measured on runs of few restarts; long runs
 /// (hundreds of restarts, see [`EigsStats::restarts`]) exceed it, and no
 /// form in the number of restarts bounds every measured run (Chapter 12.6,
-/// "Long runs").
+/// "Long runs"; Lemma R there bounds a residual the caller recomputes).
 ///
 /// # Errors
 /// As [`eigsh()`], with `k ≥ n − 1` invalid (ARPACK's `dnaupd` rule) and the
