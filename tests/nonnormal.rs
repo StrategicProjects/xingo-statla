@@ -222,11 +222,12 @@ fn coupling_check_on_a_convection_dominated_operator() {
 }
 
 /// Grcar matrices, the classical worst case: the residual ratio of
-/// criterion (b) grows with the number `R` of restarts (Chapter 12.6, "The
-/// constant", issue xingo-statla#9) and is asserted against the restart
-/// form `c_K (1 + √R/8)` of the guarantee — and, as before, against `4 c_K`,
+/// criterion (b) grows with the number `R` of restarts (Chapter 12.6, "Long
+/// runs", issue xingo-statla#9). A regression check of these four runs,
+/// not a guarantee (no form in `R` bounds every measured run): the ratio
+/// against `c_K (1 + √R/8) = 8 + √R` and, as before, against `4 c_K`,
 /// which is the tighter of the two only at Grcar(200) `LM` (988 restarts,
-/// ratio `12.1`; the restart form gives `39.4` there). Measured: `3.78`
+/// ratio `12.1`; `8 + √R` gives `39.4` there). Measured: `3.78`
 /// (`R = 108`), `3.56` (`103`), `12.10` (`988`), `3.81` (`142`), against
 /// `18.4`, `18.1`, `39.4`, `19.9`. The coupling check fires on these runs
 /// too, without changing the outcome.

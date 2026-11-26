@@ -146,8 +146,8 @@
 //!      (`c_G = 8`, measured).
 //! (K1)–(K4), (E1)–(E3), (I1)–(I3): [`eigsh()`]/[`eigs()`], the small dense
 //!      eigensolvers and shift-invert, Chapters 12.6–12.6.2 (`c_K = 8`,
-//!      measured in `f64`; times `1 + √R/8` after `R` restarts, also
-//!      measured).
+//!      measured in `f64` on runs of few restarts; long runs exceed it and
+//!      no form in the number of restarts is guaranteed, Chapter 12.6).
 //!
 //! The constants `c_H`, `c_Q` come from the measurements of the example
 //! `accuracy` with a margin, and live in the tests and in the argument of

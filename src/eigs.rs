@@ -114,18 +114,15 @@
 //! ## Invariants
 //! (K1) `‖V_jᵀV_j − I‖ ≤ c_K · j · u` — debug-asserted after every restart
 //!      (`c_K` = [`C_K`]).
-//! (K2) `‖A V_j − V_j H_j − v_{j+1} b_jᵀ‖ ≤ c_K · j · u · (1 + √R/8) · ‖A‖_est`
-//!      after every expansion, `R` the restarts so far — computed by the
-//!      unit tests (`paranoid` runs; it costs `j` extra applications). The
-//!      factor `1 + √R/8` is **measured, not proved** (issue
-//!      xingo-statla#9, "The constant"): every restart adds the backward
-//!      error of KS3 and RO, and the relation error grows like `√R`. It is
-//!      `1` before the first restart and below `1.25` for `R ≤ 4`, where
-//!      (K2) is the old `c_K j u ‖A‖_est`. Measured on long runs of `eigs`:
-//!      at most `0.77` of the bound on Grcar(100, 200) and on the 1-D
-//!      Laplacian, but **`1.05`** on Grcar(400) `LR` (`ncv = 24`, at `R =
-//!      1195`); in `eigsh`, `1.9` on the 1-D Laplacian of order 2000 (see
-//!      the guarantee).
+//! (K2) `‖A V_j − V_j H_j − v_{j+1} b_jᵀ‖ ≤ c_K · j · u · ‖A‖_est` after every
+//!      expansion **on runs of few restarts** — computed by the unit tests
+//!      (`paranoid` runs; it costs `j` extra applications). It is *not* a
+//!      bound for long runs: every restart adds the backward error of KS3
+//!      and RO, and the relation error grows with the number `R` of
+//!      restarts, like `√R` on most measured runs and faster on others (a
+//!      cluster of spacing `10⁻¹⁰` that never converges: about linearly,
+//!      `33 648u` after 10 000 restarts at `j = 24`). No form in `R` bounds every measured
+//!      run (issue xingo-statla#9, "Guarantee").
 //! (K3) After a restart `H̄` is zero outside `[S_LL H_LA; 0 T_A]` (top `k′`
 //!      rows) and the coupling row `k′`, whose locked entries are zero;
 //!      `T_A` is quasi-triangular (diagonal in `eigsh`) — debug-asserted.
@@ -135,46 +132,55 @@
 //! ## Guarantee
 //! A returned pair `(θ, y)` has, in exact arithmetic on the computed
 //! decomposition, `‖A y − θ y‖ ≤ ρ + Σ_locked |b_dropped|·|x_L|`, each term
-//! `≤ τ·max(ε^{2/3}, |θ|)`; rounding adds `c_K·m·u·(1 + √R/8)·‖A‖_est` by
-//! (K1)–(K2), `R` the number of restarts ([`EigsStats::restarts`]). Hence
-//! the acceptance form
+//! `≤ τ·max(ε^{2/3}, |θ|)`; rounding adds `c_K·m·u·‖A‖_est` by (K1)–(K2).
+//! Hence the acceptance form `‖A y − θ y‖ ≤ (τ + c_K·m·u)·‖A‖` (when `‖A‖ ≥
+//! ε^{2/3}`), **measured on runs of few restarts** — every Matrix Market
+//! fixture and every acceptance test. For symmetric `A` this bounds the
+//! distance of `θ` to the spectrum (Parlett, Thm. 4.5.1); for a general
+//! `A` the eigenvalue error is that times its condition number.
 //!
-//! ```text
-//! ‖A y − θ y‖ ≤ (τ + c_K·m·u·(1 + √R/8))·‖A‖        (when ‖A‖ ≥ ε^{2/3})
-//! ```
+//! **Long runs** (issue xingo-statla#9, task I02). The rounding term grows
+//! with the number `R` of restarts ([`EigsStats::restarts`]), because (K2)
+//! does, and **no closed form in `R` is guaranteed**: two candidates fitted
+//! to the first measurements were each exceeded by a later one —
+//! `c_K(1 + √R/8) = 8 + √R` by `eigs` on a clustered spectrum (`102.9`
+//! against `62.8`), `c_K(1 + √R/4) = 8 + 2√R` by `eigsh` on an indefinite
+//! tridiagonal (`125.5` against `117.2`). After hundreds of restarts a
+//! caller that needs the residual should recompute it. Measured in `f64`,
+//! ratio `(‖r‖/‖A‖ − τ)/(m u)` against `√(‖A‖₁‖A‖_∞)`, the worst returned
+//! pair (`allow_partial` where fewer than `k` converged, marked `*`):
 //!
-//! For symmetric `A` this bounds the distance of `θ` to the spectrum
-//! (Parlett, Thm. 4.5.1); for a general `A` the eigenvalue error is that
-//! times its condition number.
+//! | driver | matrix | which | `k`, `m` | `R` | ratio | `8 + √R` | `8 + 2√R` |
+//! |---|---|---|---|---:|---:|---:|---:|
+//! | `eigs` | Grcar(100, 3) | LM | 16, 40 | 108 | 3.78 | 18.4 | 28.8 |
+//! | `eigs` | Grcar(200, 3) | LM | 16, 40 | 988 | 12.10 | 39.4 | 70.9 |
+//! | `eigs` | Grcar(200, 3) | LI | 16, 40 | 142 | 3.81 | 19.9 | 31.8 |
+//! | `eigs` | Grcar(400, 3) | LR | 10, 24 | 1490 | 18.86 | 46.6 | 85.2 |
+//! | `eigs` | Grcar(100, 3) | LM | 10, 24 `*` | 2000 | 22.14 | 52.7 | 97.4 |
+//! | `eigs` | 1-D Laplacian, 2000 | LM | 10, 24 | 1271 | 13.82 | 43.7 | 79.3 |
+//! | `eigs` | clusters of 50, 1000 | LM | 10, 24 `*` | 3000 | **102.86** | 62.8 | 117.5 |
+//! | `eigsh` | 1-D Laplacian, 1000 | BE | 10, 24 `*` | 10000 | 31.64 | 108.0 | 208.0 |
+//! | `eigsh` | 1-D Laplacian, 2000 | LM | 10, 24 | 1221 | 48.59 | 42.9 | 77.9 |
+//! | `eigsh` | 1-D Laplacian, 3000 | LA | 10, 24 | 2659 | 93.50 | 59.6 | 111.1 |
+//! | `eigsh` | 2-D Laplacian, 45² | LM | 10, 14 | 1984 | 18.37 | 52.5 | 97.1 |
+//! | `eigsh` | 2-D Laplacian, 60² | SA | 10, 16 `*` | 3000 | 1.42 | 62.8 | 117.5 |
+//! | `eigsh` | clusters of 50, 1000 | LM | 10, 24 | 2485 | 21.56 | 57.8 | 107.7 |
+//! | `eigsh` | indefinite tridiagonal, 1000 | LM | 10, 24 | 880 | 36.70 | 37.7 | 67.3 |
+//! | `eigsh` | indefinite tridiagonal, 2000 | BE | 10, 24 | 2983 | **125.53** | 62.6 | 117.2 |
+//! | `eigsh` | graded tridiagonal, 1000 | LM | 10, 14 | 128 | 1.39 | 19.3 | 30.6 |
+//! | `eigsh_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.71 | 21.7 | 35.5 |
+//! | `eigsh_near` | 2-D Laplacian, 45², `σ = 2.0001` | — | 10, 12 | 141 | 0.23 | 19.9 | 31.7 |
+//! | `eigs_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.74 | 21.7 | 35.5 |
 //!
-//! **The factor `1 + √R/8` is measured, not proved** (issue
-//! xingo-statla#9; `c_K = 8` stays). It is `1` without restarts and below
-//! `1.25` for `R ≤ 4`, so on runs with few restarts — every Matrix Market
-//! fixture — the form is the earlier `(τ + c_K·m·u)·‖A‖`, which the fixture
-//! tests still assert without the factor. Measured in `f64`, `eigs`, ratio
-//! `(‖r‖/‖A‖ − τ)/(m u)` against `√(‖A‖₁‖A‖_∞)` and the bound `c_K(1 +
-//! √R/8) = 8 + √R`:
-//!
-//! | matrix | which | `k`, `m` | `R` | ratio | bound | slack |
-//! |---|---|---|---:|---:|---:|---:|
-//! | Grcar(100, 3) | LM | 16, 40 | 108 | 3.78 | 18.4 | 4.9 |
-//! | Grcar(100, 3) | LI | 16, 40 | 103 | 3.56 | 18.1 | 5.1 |
-//! | Grcar(200, 3) | LM | 16, 40 | 988 | 12.10 | 39.4 | 3.3 |
-//! | Grcar(200, 3) | LI | 16, 40 | 142 | 3.81 | 19.9 | 5.2 |
-//! | Grcar(400, 3) | LR | 10, 24 | 1490 | 18.86 | 46.6 | 2.5 |
-//! | Grcar(100, 3) | LM | 10, 24 (partial) | 2000 | 22.14 | 52.7 | 2.4 |
-//! | 1-D Laplacian, 1000 | LM | 16, 40 | 104 | 3.98 | 18.2 | 4.6 |
-//! | 1-D Laplacian, 2000 | LM | 10, 24 | 1271 | 13.82 | 43.7 | 3.2 |
-//!
-//! **In `eigsh` the factor is not enough on every matrix:** the 1-D
-//! Laplacian of order 2000 (`LM`, `k = 10`, `ncv = 24`) takes 1221
-//! restarts and reaches `48.6` against `8 + √R = 42.9` (and `eigs`, on the
-//! same matrix, `13.8`); of order 1000 (`k = 16`, `ncv = 40`, 104
-//! restarts) `3.30`. The symmetric engine (KS2′ overwrites the upper part
-//! of `H` by its mirror, Jacobi in KS3) accumulates faster on that matrix;
-//! the guarantee of `eigsh` for long runs is an open question (task I02).
-//! The shift-invert drivers run the same engines on `(A − σI)⁻¹`, converge
-//! in few restarts on every test and were not measured on long runs.
+//! (The 1-D Laplacian is `tridiag(−1, 2, −1)`; the indefinite tridiagonal
+//! is that minus `2I`; the graded one has diagonal `(1 − i/n)⁴` and
+//! off-diagonal `0.1√(d_i d_{i+1})`; the clusters are 20 groups of 50
+//! eigenvalues `1 − 0.04c + 10⁻⁶j`, rotated by three reflectors.) The
+//! shift-invert drivers converge fast on `(A − σI)⁻¹` and stay below `1`.
+//! The fixture tests, with few restarts, assert `(τ + c_K·m·u)·‖A‖`;
+//! `tests/nonnormal.rs` asserts the four Grcar runs of its test against
+//! `8 + √R` and `4 c_K` as a regression check of those runs, not as a
+//! guarantee.
 //!
 //! **The constant** `c_K = C_K = 8` (measured in task L3.4, `l34-tables.md`):
 //! the largest recomputed `(‖r‖/‖A‖ − τ)/(m u)` over the Matrix Market
@@ -186,9 +192,8 @@
 //! xingo-statla#2): `≤ 5.7` on Jordan-like blocks and on a
 //! convection-dominated operator, but `12.1` on the Grcar matrix of order
 //! 200 (`LM`, `k = 16`, `ncv = 40`, against `√(‖A‖₁‖A‖_∞) ≥ ‖A‖₂`): the
-//! constant was measured on near-normal fixtures and does not bound every
-//! matrix without the factor of the restarts (`tests/nonnormal.rs` asserts
-//! the restart form).
+//! constant was measured on near-normal fixtures with few restarts, and
+//! does not bound long runs (see "Long runs" above).
 //!
 //! *Where the excess comes from* (issue xingo-statla#9, task I02, measured
 //! along the runs in `f64`): not from the orthogonality of `V` — (K1) stays
@@ -207,16 +212,14 @@
 //! leaves the growth of (K2) unchanged; re-orthonormalizing `Z_A` and
 //! recomputing `T_A = Z_Aᵀ H_AA Z_A` in double-double after RO lowers it by
 //! about a tenth. Near-normal matrices converge in few restarts, which
-//! is why the fixtures stay below `2.44`. Hence the factor `1 + √R/8` of
-//! the guarantee (decided in task I02), fitted with margin to these runs.
+//! is why the fixtures stay below `2.44`.
 //!
 //! ## Acceptance (L3.4, S9; tests/eigs.rs)
 //! On Matrix Market matrices the `k` wanted eigenvalues agree with
 //! `scipy.sparse.linalg.eigsh`/`eigs` (ARPACK; fixtures committed) to
 //! `1e-10` relative where the gap to the rest of the spectrum is `≥
-//! 10⁻⁶‖A‖`, and every pair has `‖Ay − θy‖ ≤ (τ + c_K·m·u)‖A‖` — the
-//! guarantee without the factor of the restarts, which these runs do not
-//! need (with `τ =
+//! 10⁻⁶‖A‖`, and every pair has `‖Ay − θy‖ ≤ (τ + c_K·m·u)‖A‖` (runs of
+//! few restarts; with `τ =
 //! 0` the literal `τ‖A‖` is below the rounding of the residual itself; see
 //! question Q-L34-2). The double-double smoke tests cover `eigsh`, `eigs`,
 //! `eigsh_near` and `eigs_near`, and `eigsh_near`'s criteria are also
@@ -1253,10 +1256,10 @@ impl<T: Real> Engine<T> {
 /// **Acceptance (L3.4):** on symmetric Matrix Market matrices the `k`
 /// extreme eigenvalues agree with `scipy.sparse.linalg.eigsh` (ARPACK) to
 /// `1e-10` relative where the eigenvalue gap is `≥ 1e-6 ‖A‖` (S9), and
-/// every pair has `‖Ay − θy‖ ≤ (tol + c_K·ncv·u) ‖A‖` (`c_K = 8`). Long
-/// runs (hundreds of restarts) exceed it, and on one measured matrix even
-/// the restart form `(tol + c_K·ncv·u·(1 + √R/8))‖A‖` of [`eigs()`]: see
-/// Chapter 12.6, "Guarantee".
+/// every pair has `‖Ay − θy‖ ≤ (tol + c_K·ncv·u) ‖A‖` (`c_K = 8`), measured
+/// on runs of few restarts. Long runs (hundreds of restarts, see
+/// [`EigsStats::restarts`]) exceed it, and no form in the number of
+/// restarts bounds every measured run: Chapter 12.6, "Long runs".
 ///
 /// # Errors
 /// [`StatlaError::InvalidArgument`] (not square; `which` not symmetric; `k
@@ -1294,10 +1297,11 @@ fn sym_result<T: Real>(raw: Raw<T>) -> SymEigen<T> {
 /// (conjugate pairs never split), locking and purging by truncation,
 /// eigenvectors by back substitution in the quasi-triangular form.
 ///
-/// **Guarantee:** every pair has `‖Ay − θy‖ ≤ (tol + c_K·ncv·u·(1 + √R/8))
-/// ‖A‖` (`c_K = 8`, `R` = [`EigsStats::restarts`]); the factor of the
-/// restarts is measured, not proved (Chapter 12.6, "Guarantee"), and is `1`
-/// on runs without restarts.
+/// **Guarantee:** as [`eigsh()`]: every pair has `‖Ay − θy‖ ≤ (tol +
+/// c_K·ncv·u)‖A‖` (`c_K = 8`), measured on runs of few restarts; long runs
+/// (hundreds of restarts, see [`EigsStats::restarts`]) exceed it, and no
+/// form in the number of restarts bounds every measured run (Chapter 12.6,
+/// "Long runs").
 ///
 /// # Errors
 /// As [`eigsh()`], with `k ≥ n − 1` invalid (ARPACK's `dnaupd` rule) and the
@@ -1390,9 +1394,8 @@ mod tests {
     }
 
     /// (K2) holds after every expansion; restarts and locking happen. The
-    /// runs restart a few times only, and the assertion keeps the constant
-    /// without the factor `1 + √R/8` of (K2), which is at least `1`: the
-    /// stricter test (issue xingo-statla#9).
+    /// runs restart a few times only, which is where (K2) is stated (issue
+    /// xingo-statla#9: long runs exceed it).
     #[test]
     fn krylov_relation_holds_after_every_expansion() {
         fn k2_of<T: Real>(sym: bool, u: f64) -> f64 {
