@@ -116,7 +116,10 @@
 //!      (`c_K` = [`C_K`]).
 //! (K2) `‖A V_j − V_j H_j − v_{j+1} b_jᵀ‖ ≤ c_K · j · u · ‖A‖_est` after every
 //!      expansion — computed by the unit tests (`paranoid` runs; it costs `j`
-//!      extra applications).
+//!      extra applications). Measured on runs of tens of restarts; it is
+//!      *not* a bound for long runs: every restart adds the backward error
+//!      of KS3 and RO, and the relation error grows like `√R` with the
+//!      number `R` of restarts (issue xingo-statla#9, "The constant").
 //! (K3) After a restart `H̄` is zero outside `[S_LL H_LA; 0 T_A]` (top `k′`
 //!      rows) and the coupling row `k′`, whose locked entries are zero;
 //!      `T_A` is quasi-triangular (diagonal in `eigsh`) — debug-asserted.
@@ -143,8 +146,27 @@
 //! convection-dominated operator, but `12.1` on the Grcar matrix of order
 //! 200 (`LM`, `k = 16`, `ncv = 40`, against `√(‖A‖₁‖A‖_∞) ≥ ‖A‖₂`): the
 //! constant was measured on near-normal fixtures and does not bound every
-//! matrix (`tests/nonnormal.rs` reports it; task I01 leaves the constant
-//! to a decision).
+//! matrix (`tests/nonnormal.rs` reports it).
+//!
+//! *Where the excess comes from* (issue xingo-statla#9, task I02, measured
+//! along the runs in `f64`): not from the orthogonality of `V` — (K1) stays
+//! at most `14u` in these runs, 988 restarts included — but from the Krylov
+//! relation (K2), which grows with the number `R` of restarts, roughly as
+//! `27√R · u‖A‖_est` at `m = 40` (`85u` after 10 restarts, `275u` after
+//! 100, `817u` at the end, against `c_K m u = 320u`), in every Grcar run
+//! measured (orders 100 to 400; the final ratio of criterion (b) is `0.3√R`
+//! to `0.5√R`). Every restart replaces `Z_Aᵀ H_AA Z_A` by the computed
+//! `T_A`, whose backward error is about `20u‖H_AA‖_F` after KS3 and `22u`
+//! after RO (RO adds `2u`), and the kept columns carry the relation error
+//! of the previous restarts, rotated; the growth like `√R` is that of
+//! errors adding up as a random walk.
+//! Neither candidate of the issue is the source: forming `V Z_A` in
+//! double-double, or skipping the sweep of KS7′ (then (K1) reaches `526u`),
+//! leaves the growth of (K2) unchanged; re-orthonormalizing `Z_A` and
+//! recomputing `T_A = Z_Aᵀ H_AA Z_A` in double-double after RO lowers it by
+//! about a tenth. Near-normal matrices converge in few restarts, which
+//! is why the fixtures stay below `2.44`. The guarantee above is unchanged;
+//! a form with `R` in it is a question to the maintainers (task I02).
 //!
 //! ## Acceptance (L3.4, S9; tests/eigs.rs)
 //! On Matrix Market matrices the `k` wanted eigenvalues agree with
