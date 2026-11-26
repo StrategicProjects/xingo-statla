@@ -22,7 +22,9 @@ pub mod mm;
 pub mod svd;
 
 use xingo_extprec::DoubleDouble as Dd;
-use xingo_statla::{CholOptions, Cholesky, DenseBlock, MatRef, Qr, QrOptions, Real};
+use xingo_statla::{
+    CholOptions, Cholesky, DenseBlock, DenseKernel, MatRef, NaiveDense, Qr, QrOptions, Real,
+};
 
 /// The scalars of the tests: `f64` and `DoubleDouble`.
 pub trait Scalar: Real {
@@ -251,7 +253,7 @@ pub fn gram<T: Scalar>(r: &DenseBlock<T>) -> Vec<Dd> {
 }
 
 /// `‖RᵀR − A_t‖_F / ‖A_t‖_F` (H2).
-pub fn chol_backward<T: Scalar>(c: &Cholesky<T>, at: &[Dd]) -> f64 {
+pub fn chol_backward<T: Scalar, K: DenseKernel<T>>(c: &Cholesky<T, K>, at: &[Dd]) -> f64 {
     let r = c.upper().to_block();
     let g = gram(&r);
     let d: Vec<Dd> = g.iter().zip(at).map(|(&x, &y)| x - y).collect();
@@ -435,6 +437,18 @@ pub struct CholCase {
 /// Run one [`CholCase`]; `Err` with a message if a step that must succeed
 /// fails.
 pub fn chol_case<T: Scalar>(n: usize, kappa: f64, seed: u64) -> Result<CholCase, String> {
+    chol_case_with::<T, NaiveDense>(n, kappa, seed, NaiveDense)
+}
+
+/// [`chol_case`] with the dense kernel `kernel` for the factorizations in
+/// `T` (the factor of `A` and the refactorization `R_f`; the reference
+/// `R⋆` stays the double-double factor of the reference kernel).
+pub fn chol_case_with<T: Scalar, K: DenseKernel<T> + Clone>(
+    n: usize,
+    kappa: f64,
+    seed: u64,
+    kernel: K,
+) -> Result<CholCase, String> {
     let ap = spd(n, kappa, seed);
     let mut rng = Rng::new(seed ^ 0x5eed_0fc0_ffee);
     let x = unit(&mut rng, n);
@@ -448,8 +462,9 @@ pub fn chol_case<T: Scalar>(n: usize, kappa: f64, seed: u64) -> Result<CholCase,
         }
     }
     let ad = to_dd(&at_view);
-    let r0 = Cholesky::factor(
+    let r0 = Cholesky::factor_with(
         MatRef::new(n, n, n, &at_view).unwrap(),
+        kernel.clone(),
         &CholOptions::default(),
     )
     .map_err(|e| format!("factor: {e}"))?;
@@ -474,8 +489,12 @@ pub fn chol_case<T: Scalar>(n: usize, kappa: f64, seed: u64) -> Result<CholCase,
             af[i + j * n] -= xt[i] * xt[j];
         }
     }
-    let rf = Cholesky::factor(MatRef::new(n, n, n, &af).unwrap(), &CholOptions::default())
-        .map_err(|e| format!("refactorization in T: {e}"))?;
+    let rf = Cholesky::factor_with(
+        MatRef::new(n, n, n, &af).unwrap(),
+        kernel,
+        &CholOptions::default(),
+    )
+    .map_err(|e| format!("refactorization in T: {e}"))?;
     let fwd = rel(&c1.upper().to_block().data, &r1b.data);
     let dist = rel(&rf.upper().to_block().data, &r1b.data);
     let kappa_est = kappa_of_upper(&upper_f64(&r1b));

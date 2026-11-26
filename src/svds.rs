@@ -119,7 +119,10 @@
 //! `scipy.sparse.linalg.svds` on Matrix Market matrices, `1e-10` relative
 //! on the `σ_i ≥ 10⁻³σ_1` with gap `≥ 10⁻⁶σ_1` — moved to task L3.4
 //! (D-0134), in CI on committed fixtures (tests/arpack.rs); (iv)
-//! `DoubleDouble`: (i) with `u = 2⁻¹⁰⁵`.
+//! `DoubleDouble`: (i) with `u = 2⁻¹⁰⁵`. Added by issue xingo-statla#7:
+//! (i) and (ii) under many restarts with heavy locking (`σ_j = 1/(1 +
+//! j/50)`, `k = 30`, `ncv = 36` on `400 × 300`: 34 restarts; and `k = 40`,
+//! `ncv = 48` on `2000 × 1900`, an ignored test of 21 s in release).
 //!
 //! ## References
 //! Golub & Kahan, "Calculating the singular values and pseudo-inverse of

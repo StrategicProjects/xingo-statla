@@ -39,6 +39,11 @@ fn log_kappa() -> impl Strategy<Value = f64> {
 /// One downdate/update case: (i), (ii), (iii-a), (H1) (inside `chol_case`).
 fn check_case<T: Scalar>(n: usize, kappa: f64, seed: u64) -> Result<(), TestCaseError> {
     let c = chol_case::<T>(n, kappa, seed).map_err(TestCaseError::fail)?;
+    check_measures::<T>(n, &c)
+}
+
+/// The assertions of `check_case` on a computed case.
+fn check_measures<T: Scalar>(n: usize, c: &support::CholCase) -> Result<(), TestCaseError> {
     let u = T::u();
     let nu = n as f64 * u;
     prop_assert!(
@@ -368,11 +373,20 @@ fn downdate_whose_diagonal_underflows_is_refused_by_c3_prime() {
 /// 50` in double-double (ratio 11.6 at `κ = 10¹²`, 20 seeds): question
 /// Q-L32-2.
 fn aggregate<T: Scalar>(ns: &[usize], seeds: u64) {
+    aggregate_with::<T>(ns, seeds, |n, kappa, seed| chol_case::<T>(n, kappa, seed));
+}
+
+/// `aggregate` over the cases that `case` computes (the kernel varies).
+fn aggregate_with<T: Scalar>(
+    ns: &[usize],
+    seeds: u64,
+    case: impl Fn(usize, f64, u64) -> Result<support::CholCase, String>,
+) {
     for &n in ns {
         for &kappa in &[1e1, 1e3, 1e6, 1e9, 1e12] {
             let (mut fwd, mut dist) = (0.0f64, 0.0f64);
             for s in 0..seeds {
-                let c = chol_case::<T>(n, kappa, 31_000 + s).unwrap();
+                let c = case(n, kappa, 31_000 + s).unwrap();
                 fwd = fwd.max(c.fwd);
                 dist = dist.max(c.dist);
             }
@@ -826,6 +840,37 @@ fn faer_kernel_factors_the_same_matrix() {
     .unwrap();
     let d = support::rel(&c2.upper().to_block().data, &c1.upper().to_block().data);
     assert!(d < 1e-12, "{d:e}");
+}
+
+#[cfg(feature = "faer")]
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(support::cases(48)))]
+
+    /// (i), (ii), (iii-a) in `f64` with the dense kernel `FaerDense` of
+    /// `xingo-sparse` (feature `faer`) as the `K` of `Cholesky`: the factor
+    /// of `A` and the refactorization by faer's `potrf`, the downdates and
+    /// updates as always (issue xingo-statla#7).
+    #[test]
+    fn downdate_update_faer(n in 1usize..=200, kappa in log_kappa(), seed in any::<u64>()) {
+        let c = support::chol_case_with::<f64, _>(n, kappa, seed, xingo_sparse_faer())
+            .map_err(TestCaseError::fail)?;
+        check_measures::<f64>(n, &c)?;
+    }
+}
+
+/// Criterion (iii) in aggregate with `K = FaerDense` (as
+/// `forward_error_in_aggregate_f64`).
+#[cfg(feature = "faer")]
+#[test]
+fn forward_error_in_aggregate_faer() {
+    let ns: &[usize] = if cfg!(debug_assertions) {
+        &[100]
+    } else {
+        &[100, 200]
+    };
+    aggregate_with::<f64>(ns, 20, |n, kappa, seed| {
+        support::chol_case_with::<f64, _>(n, kappa, seed, xingo_sparse_faer())
+    });
 }
 
 #[cfg(feature = "faer")]

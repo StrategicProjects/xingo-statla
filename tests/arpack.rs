@@ -632,3 +632,134 @@ fn shift_invert_solves_are_backward_stable() {
         assert!(worst <= 2.0, "{name}: η = {worst} u");
     }
 }
+
+/// (e), continued: `eigs_near` in `DoubleDouble` (`Lu<Dd>` with
+/// `LuOptions::for_scalar::<Dd>()`, Algorithm R in double-double) on the
+/// random nonsymmetric matrix, `σ = 0.25` (issue xingo-statla#7): the
+/// values agree with the `f64` run and with ARPACK, the residuals on `A`
+/// are at the double-double level.
+#[test]
+fn double_double_eigs_near_smoke() {
+    let udd = Dd::EPSILON.to_f64() / 2.0;
+    let name = "nonsymrand_200";
+    let a = read_mm(name).a;
+    let r = Ref::read(name);
+    let anorm = r.values("norm2").unwrap()[0];
+    let n = a.n_rows();
+    let (sigma, k) = (0.25, 4);
+    let f64_run = eigs_near(&a, k, sigma, &EigsOptions::default()).unwrap();
+    let mut ad = to_dd(&a);
+    let f = eigs_near(&ad, k, Dd::from_f64(sigma), &EigsOptions::default()).unwrap();
+    assert_eq!(f.values.len(), k);
+    let arpack: Vec<(f64, f64)> = r
+        .tagged("eigs_near")
+        .into_iter()
+        .find(|(tag, _, _)| tag.parse::<f64>().unwrap() == sigma)
+        .map(|(_, _, v)| v.chunks(2).map(|c| (c[0], c[1])).collect())
+        .unwrap();
+    let (yr, yi) = (
+        f.vectors_re.as_ref().unwrap(),
+        f.vectors_im.as_ref().unwrap(),
+    );
+    for (c, th) in f.values.iter().enumerate() {
+        let t64 = f64_run.values[c];
+        let (re, im) = (th.re.to_f64(), th.im.to_f64());
+        assert!(
+            (re - t64.re).hypot(im - t64.im) <= 1e-12 * anorm,
+            "{th:?} {t64:?}"
+        );
+        let near = arpack
+            .iter()
+            .flat_map(|&(x, y)| [(x, y), (x, -y)])
+            .map(|(x, y)| (x - re).hypot(y - im))
+            .fold(f64::INFINITY, f64::min);
+        assert!(near <= 1e-10 * anorm, "{th:?}: ARPACK at {near:e}");
+        let res = residual_dd(
+            &mut ad,
+            &yr.data[c * n..(c + 1) * n],
+            &yi.data[c * n..(c + 1) * n],
+            *th,
+        );
+        let ratio = (res / anorm - 2.0 * udd) / (20.0 * udd);
+        eprintln!("dd eigs_near {c}: θ = {re:.6} {im:+.6}i, residual ratio {ratio:.3}");
+        assert!(ratio <= C_K_DD, "{ratio}");
+    }
+    // The conjugate pairs keep the `+i` member first (Algorithm SG6).
+    for w in f.values.windows(2) {
+        assert!(w[0].im >= Dd::ZERO || w[1].im != -w[0].im, "{:?}", f.values);
+    }
+}
+
+/// The acceptance of `eigsh_near` (criteria (a), (b), (c)) with `K =
+/// FaerDense` (feature `faer`) as the dense kernel of the supernodal
+/// `LBLᵀ` of `SymShiftInvert` (issue xingo-statla#7): built directly,
+/// `eigsh` on it, `λ = σ + 1/ν`; the values also agree with those of the
+/// reference kernel (`eigsh_near`) to `10⁻¹²‖A‖`.
+#[cfg(feature = "faer")]
+#[test]
+fn eigsh_near_with_the_faer_kernel_matches_arpack() {
+    use xingo_statla::SymShiftInvert;
+    let u = f64::EPSILON / 2.0;
+    let tau = f64::EPSILON;
+    for name in SYM {
+        let a = read_mm(name).a;
+        let r = Ref::read(name);
+        let n = a.n_rows();
+        let anorm = r.values("norm2").unwrap()[0];
+        let dense = r.values("dense").unwrap();
+        let spec: Vec<(f64, f64)> = dense.iter().map(|&x| (x, 0.0)).collect();
+        for (tag, k, vals) in r.tagged("eigsh_near") {
+            let sigma: f64 = tag.parse().unwrap();
+            let mut op = SymShiftInvert::<f64, _>::new(&a, sigma, xingo_sparse::FaerDense).unwrap();
+            // (c).
+            assert_eq!(
+                op.count_below(),
+                dense.iter().filter(|&&x| x < sigma).count(),
+                "{name} σ = {sigma}"
+            );
+            let mut f =
+                eigsh(&mut op, k, Which::LargestMagnitude, &EigsOptions::default()).unwrap();
+            for v in &mut f.values {
+                *v = sigma + 1.0 / *v;
+            }
+            let ours: Vec<Complex<f64>> =
+                f.values.iter().map(|&re| Complex { re, im: 0.0 }).collect();
+            let arp: Vec<(f64, f64)> = vals.iter().map(|&x| (x, 0.0)).collect();
+            let cmp = compare(
+                &ours,
+                &arp,
+                &spec,
+                anorm,
+                &format!("{name} faer near {sigma}"),
+            );
+            let (reference, _) = eigsh_near(&a, k, sigma, &EigsOptions::default()).unwrap();
+            let y = f.vectors.as_ref().unwrap();
+            let mut worst = 0.0f64;
+            for (c, &th) in f.values.iter().enumerate() {
+                assert!(
+                    (th - reference.values[c]).abs() <= 1e-12 * anorm,
+                    "{name} σ = {sigma}: faer {th} vs reference {}",
+                    reference.values[c]
+                );
+                let rr = residual(
+                    &a,
+                    &y.data[c * n..(c + 1) * n],
+                    &vec![0.0; n],
+                    Complex { re: th, im: 0.0 },
+                );
+                let ratio = (rr / anorm - tau) / (default_ncv(n, k) as f64 * u);
+                assert!(ratio <= C_K, "{name} faer near {sigma} {c}: ratio {ratio}");
+                worst = worst.max(ratio);
+            }
+            print_row(
+                name,
+                &format!("eigsh_near σ={sigma}, K = FaerDense"),
+                cmp,
+                worst,
+                f.stats.restarts,
+                f.stats.applies,
+                0.0,
+            );
+        }
+    }
+}

@@ -118,7 +118,7 @@ fn case_ncv(
     k: usize,
     seed: u64,
     ncv: Option<usize>,
-) {
+) -> xingo_statla::SvdStats {
     let (mut a, delta) = prescribed(m, n, sigma, seed);
     let opts = SvdsOptions {
         ncv,
@@ -143,6 +143,7 @@ fn case_ncv(
         f.stats.reorthogonalizations
     );
     assert_eq!(f.stats.converged, k);
+    f.stats
 }
 
 fn geometric(len: usize, lo: f64) -> Vec<f64> {
@@ -210,6 +211,33 @@ fn large_matrix_2000_rows() {
         10,
         6,
     );
+}
+
+/// Many restarts under heavy locking (issue xingo-statla#7): a slowly
+/// decaying spectrum `σ_j = 1/(1 + j/50)` (relative gaps `≈ 2%` at the
+/// top, `0.7%` at `σ_30`), `k = 30` wanted with `ncv = 36`, so that each
+/// restart keeps few unconverged vectors and the wanted lock a few at a
+/// time; asserted as every `case`, and `> 4` restarts.
+#[test]
+fn many_restarts_with_locking() {
+    let s: Vec<f64> = (0..300)
+        .map(|j| 1.0 / (1.0 + f64::from(j) / 50.0))
+        .collect();
+    let stats = case_ncv("slow decay, ncv = k + 6", 400, 300, &s, 30, 21, Some(36));
+    assert!(stats.restarts > 4, "{} restarts", stats.restarts);
+}
+
+/// The same at `2000 × 1900` (both dimensions near 2000), `k = 40`, `ncv
+/// = 48`: ignored by default for its cost (`cargo test --release --test
+/// svds -- --ignored`).
+#[test]
+#[ignore = "slow (a 2000 × 1900 dense operator formed in double-double): run with --ignored"]
+fn many_restarts_with_locking_2000x1900() {
+    let s: Vec<f64> = (0..1900)
+        .map(|j| 1.0 / (1.0 + f64::from(j) / 50.0))
+        .collect();
+    let stats = case_ncv("2000x1900 slow decay", 2000, 1900, &s, 40, 22, Some(48));
+    assert!(stats.restarts > 4, "{} restarts", stats.restarts);
 }
 
 /// Exact multiple values: criterion (i) and the guarantee (some `σ_j`

@@ -116,6 +116,10 @@
 //! values are in `.claude/scratch/l32/l32-tables.md`; the example
 //! `accuracy` regenerates them.
 //!
+//! With the dense kernel `FaerDense` (feature `faer`) as `K`, the
+//! acceptance (i)–(iii-a) and the aggregate (iii) hold with the same
+//! constants (issue xingo-statla#7).
+//!
 //! **Graded and badly scaled matrices** (issue xingo-statla#6). Algorithms
 //! F, U and C only combine entries of one column of `R` (and `x_j`), which
 //! share the scale `d_j` of `A = D A′ D`, so their errors are those of the

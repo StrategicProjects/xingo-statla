@@ -139,7 +139,10 @@
 //! `1e-10` relative where the gap to the rest of the spectrum is `≥
 //! 10⁻⁶‖A‖`, and every pair has `‖Ay − θy‖ ≤ (τ + c_K·m·u)‖A‖` (with `τ =
 //! 0` the literal `τ‖A‖` is below the rounding of the residual itself; see
-//! question Q-L34-2).
+//! question Q-L34-2). The double-double smoke tests cover `eigsh`, `eigs`,
+//! `eigsh_near` and `eigs_near`, and `eigsh_near`'s criteria are also
+//! checked with the dense kernel `FaerDense` (feature `faer`) inside its
+//! `LBLᵀ` (issue xingo-statla#7).
 //!
 //! ## Divergences from the references
 //! * Restart by Krylov–Schur, not implicit QR (S7). Results are compared
