@@ -379,9 +379,11 @@ closed have an issue.
    of `xingo-sparse` needs the inertia declared in advance, until it gains
    an indefinite form
    ([xingo-sparse#8](https://github.com/StrategicProjects/xingo-sparse/issues/8)).
-5. **Memory of the refinement:** shift-invert keeps a copy of `A − σI`
-   beside its factorization, which doubles the memory of the matrix (not
-   measured on large matrices) ([#3](https://github.com/StrategicProjects/xingo-statla/issues/3)).
+5. **Memory of the refinement:** the public operators `ShiftInvert` and
+   `SymShiftInvert` keep a copy of `A − σI` beside its factorization (as
+   much memory as `A`); `eigs_near` and `eigsh_near` do not, and form the
+   residual from the caller's `A` with the same bits. The peak, set by the
+   factorization, is unchanged ([#3](https://github.com/StrategicProjects/xingo-statla/issues/3)).
 6. **Hardware:** s390x runs under emulation (QEMU), not on hardware, and
    no x86_64 CPU without SSE2 or with AVX-512 was tried.
 7. **The literature in the chapters is cited from memory**, including the

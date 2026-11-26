@@ -67,9 +67,9 @@
 //! apply `x ↦ M⁻¹x` as
 //! R1. \[Solve.\] `y ← F⁻¹x` with the factorization `F ≈ M` (LU `ftran`, or
 //!     the `LBLᵀ` solve).
-//! R2. \[Residual.\] `r ← x − M y`, in the scalar `T`, with the stored `M`
-//!     (the whole `A − σI` for the LU; its lower triangle, applied
-//!     symmetrically, for the `LBLᵀ`).
+//! R2. \[Residual.\] `r ← x − M y`, in the scalar `T`, with `M` (the whole
+//!     `A − σI` for the LU; its lower triangle, applied symmetrically, for
+//!     the `LBLᵀ`) stored, or generated from `A` by step R2′ below.
 //! R3. \[Correct.\] `y ← y + F⁻¹r`.
 //!
 //! *What it guarantees.* Without R2–R3 the computed `y` solves `(M + δM) y
@@ -137,9 +137,48 @@
 //!    too); `σ` should be put near the wanted values, not on one of them,
 //!    when several are wanted to full accuracy.
 //!
+//! *Where `M` comes from in R2* (issue xingo-statla#3, task I03). The
+//! public operators [`ShiftInvert`] and [`SymShiftInvert`] own their data
+//! (no lifetime), so they keep `M` (the whole of it, or its lower
+//! triangle) beside the factorization. The drivers [`eigs_near`] and
+//! [`eigsh_near`] hold the caller's `A` for the whole run, so they do not
+//! keep `M`: their private operators drop it once it is factorized and
+//! form the products of R2 from `A` and `σ`, entry by entry:
+//!
+//! R2′. \[Residual from `A`.\] For `j = 1, …, n`, the entries of column `j`
+//!      of `M` are generated from column `j` of `A` by the rule of SI2/SG2
+//!      — `a_ij` for `i ≠ j` (skipped for `i < j` in the symmetric case),
+//!      `fl(a_jj − σ)` on the diagonal, `−σ` there when `A` stores no
+//!      diagonal entry, an exact zero skipped — and consumed at once by the
+//!      loop of R2.
+//!
+//! *Lemma B (same bits).* R2′ performs the same floating-point operations
+//! in the same order as R2 on the stored `M`. *Proof.* Both build `M` and
+//! visit its entries through one routine (`shifted_col`): SI2/SG2 push the
+//! entries of column `j` in the order it generates them, and R2′ receives
+//! the same sequence; the values are the same roundings `fl(a_jj − σ)` of
+//! the same operands. R2 updates `r_i ← r_i − m_ij y_j` per entry, in
+//! column order, and, in the symmetric case, adds `m_ij y_i` (`i ≠ j`) to
+//! one accumulator per column in the entry order and subtracts it from
+//! `r_j` after the column; R2′ executes that same code on that same
+//! sequence. Every application therefore returns the bits the stored
+//! operator returns, and so do [`eigs_near`]/[`eigsh_near`] (tested:
+//! `near_drivers_keep_no_copy_and_the_same_bits`). ∎
+//!
 //! *Cost.* Per application one more solve and one sparse product with `M`
 //! (`2·nnz(M)` flops; the solves dominate), and the `n`-vectors `r`, `d`
-//! kept in the operator; the stored `M` doubles the matrix memory.
+//! kept in the operator. The public operators keep `M`, `nnz(M)·(s_T + 4)
+//! + 8(n + 1)` bytes (`s_T` the size of `T`, `u32` row indices) — as much
+//! as `A` itself; the drivers keep none of it after the factorization.
+//! The factorization itself still needs `M` while it runs, so the peak of
+//! a driver is not lowered when the factorization is the peak. *Measured*
+//! (task I03, counting allocator, 5-point 2-D Laplacian, `k = 6`,
+//! `ncv = 20`, `σ = 0.05`): the memory held when the Krylov basis is
+//! allocated drops by the bytes of `M` (with its spare capacity) —
+//! `eigsh_near`, `n = 62 500`: `49.32 → 45.98` MiB; `eigs_near`, `n =
+//! 22 500`: `41.39 → 39.68` MiB — and the peak (`59.6`, `59.8` MiB, the
+//! factorization) does not change. The factor, not `M`, dominates: `M` is
+//! `3.3` of those `49.3` MiB.
 //!
 //! ## Invariants
 //! (I1) `count_below + n₀ + n₊ = n` with `n₀ = 0` for every operator built.
@@ -178,20 +217,59 @@ fn idx32(j: usize) -> u32 {
     u32::try_from(j).unwrap_or(u32::MAX)
 }
 
+/// The entries of `M = A − σI` column by column, in row order: the stored
+/// `M` of the public operators, or `M` generated from `A` (step R2′).
+trait ShiftedColumns<T: Real> {
+    /// Order of `M`.
+    fn order(&self) -> usize;
+    /// Call `f(i, m_ij)` for the stored entries of column `j`, in row order.
+    fn for_col<F: FnMut(u32, T)>(&self, j: usize, f: F);
+}
+
+impl<T: Real> ShiftedColumns<T> for CscMatrix<T> {
+    fn order(&self) -> usize {
+        self.n_cols()
+    }
+    fn for_col<F: FnMut(u32, T)>(&self, j: usize, mut f: F) {
+        let (rows, vals) = self.col(Col::from_usize(j));
+        for (&i, &v) in rows.iter().zip(vals) {
+            f(i, v);
+        }
+    }
+}
+
+/// `M = A − σI` generated from the caller's `A` (step R2′): the whole of
+/// it, or (`lower_only`) its lower triangle.
+#[derive(Debug, Clone, Copy)]
+struct FromA<'a, T: Real> {
+    a: &'a CscMatrix<T>,
+    sigma: T,
+    lower_only: bool,
+}
+
+impl<T: Real> ShiftedColumns<T> for FromA<'_, T> {
+    fn order(&self) -> usize {
+        self.a.n_cols()
+    }
+    fn for_col<F: FnMut(u32, T)>(&self, j: usize, f: F) {
+        shifted_col(self.a, self.sigma, j, self.lower_only, f);
+    }
+}
+
 /// Step R2: `r ← r − M y`, with `m` the whole `M` or (`symmetric`) its
-/// lower triangle applied as the symmetric matrix it stands for.
-fn sub_product<T: Real>(m: &CscMatrix<T>, y: &[T], r: &mut [T], symmetric: bool) {
-    for j in 0..m.n_cols() {
-        let (rows, vals) = m.col(Col::from_usize(j));
+/// lower triangle applied as the symmetric matrix it stands for. One body
+/// for the stored and the generated `M` (Lemma B).
+fn sub_product<T: Real, S: ShiftedColumns<T>>(m: &S, y: &[T], r: &mut [T], symmetric: bool) {
+    for j in 0..m.order() {
         let yj = y[j];
         let mut acc = T::ZERO;
-        for (&i, &v) in rows.iter().zip(vals) {
+        m.for_col(j, |i, v| {
             let iu = i as usize;
             r[iu] -= v * yj;
             if symmetric && iu != j {
                 acc += v * y[iu];
             }
-        }
+        });
         if symmetric {
             r[j] -= acc;
         }
@@ -228,6 +306,46 @@ fn check_input<T: Real>(a: &CscMatrix<T>, sigma: T) -> Result<usize, StatlaError
     Ok(a.n_cols())
 }
 
+/// SI2/SG2 for column `j`: `push(i, m_ij)` for the stored entries of column
+/// `j` of `A − σI` (rows `i ≥ j` only if `lower_only`), in row order. The
+/// one rule of both the stored `M` and step R2′ (Lemma B).
+fn shifted_col<T: Real, F: FnMut(u32, T)>(
+    a: &CscMatrix<T>,
+    sigma: T,
+    j: usize,
+    lower_only: bool,
+    mut push: F,
+) {
+    // An exact zero is not stored (invariant of `CscMatrix`): a diagonal
+    // entry that cancels, or `−σ` for `σ = 0`.
+    let mut put = |i: u32, v: T| {
+        if !is_exact_zero(v) {
+            push(i, v);
+        }
+    };
+    let (rows, vals) = a.col(Col::from_usize(j));
+    let mut diag_done = false;
+    for (&i, &v) in rows.iter().zip(vals) {
+        let iu = i as usize;
+        if lower_only && iu < j {
+            continue;
+        }
+        if iu > j && !diag_done {
+            put(idx32(j), -sigma);
+            diag_done = true;
+        }
+        if iu == j {
+            put(i, v - sigma);
+            diag_done = true;
+        } else {
+            put(i, v);
+        }
+    }
+    if !diag_done {
+        put(idx32(j), -sigma);
+    }
+}
+
 /// SI2/SG2: `A − σI`, the whole matrix or its lower triangle.
 fn shifted<T: Real>(a: &CscMatrix<T>, sigma: T, lower_only: bool) -> CscMatrix<T> {
     let n = a.n_cols();
@@ -235,36 +353,11 @@ fn shifted<T: Real>(a: &CscMatrix<T>, sigma: T, lower_only: bool) -> CscMatrix<T
     let mut row_idx = Vec::with_capacity(a.nnz() + n);
     let mut val = Vec::with_capacity(a.nnz() + n);
     col_ptr.push(0);
-    // An exact zero is not stored (invariant of `CscMatrix`): a diagonal
-    // entry that cancels, or `−σ` for `σ = 0`.
-    let push = |i: u32, v: T, row_idx: &mut Vec<u32>, val: &mut Vec<T>| {
-        if !is_exact_zero(v) {
+    for j in 0..n {
+        shifted_col(a, sigma, j, lower_only, |i, v| {
             row_idx.push(i);
             val.push(v);
-        }
-    };
-    for j in 0..n {
-        let (rows, vals) = a.col(Col::from_usize(j));
-        let mut diag_done = false;
-        for (&i, &v) in rows.iter().zip(vals) {
-            let iu = i as usize;
-            if lower_only && iu < j {
-                continue;
-            }
-            if iu > j && !diag_done {
-                push(idx32(j), -sigma, &mut row_idx, &mut val);
-                diag_done = true;
-            }
-            if iu == j {
-                push(i, v - sigma, &mut row_idx, &mut val);
-                diag_done = true;
-            } else {
-                push(i, v, &mut row_idx, &mut val);
-            }
-        }
-        if !diag_done {
-            push(idx32(j), -sigma, &mut row_idx, &mut val);
-        }
+        });
         col_ptr.push(row_idx.len());
     }
     CscMatrix {
@@ -275,34 +368,26 @@ fn shifted<T: Real>(a: &CscMatrix<T>, sigma: T, lower_only: bool) -> CscMatrix<T
     }
 }
 
-/// `x ↦ (A − σI)⁻¹ x` for a square sparse `A`, by the threshold LU of
-/// `xingo-sparse` (`Lu<T>` over the columns of `A − σI`, factorized once),
-/// with one step of iterative refinement per application (Algorithm R: two
-/// solves and one product with `A − σI`, which the operator keeps). The
-/// operator of [`eigs_near`] (Algorithm SG of Chapter 12.6.2).
+/// The threshold LU of `M` with the workspace of Algorithm R (no `M`).
 #[derive(Debug)]
-pub struct ShiftInvert<T: Real = f64> {
-    sigma: T,
+struct LuSolver<T: Real> {
     n: usize,
     lu: xingo_sparse::Lu<T>,
     work: SparseVec<T>,
-    /// `M = A − σI` (Algorithm R).
-    m: CscMatrix<T>,
     /// The residual `r` of step R2.
     r: Vec<T>,
     /// The correction `d = F⁻¹r` of step R3.
     d: Vec<T>,
 }
 
-impl<T: Real> ShiftInvert<T> {
-    /// Factorize `A − σI`.
-    ///
-    /// # Errors
-    /// [`StatlaError::InvalidArgument`] (not square; options outside the
-    /// domain `xingo-sparse` asserts), [`StatlaError::NonFinite`] (`a`,
-    /// `sigma`), [`StatlaError::Lu`] (a structurally invalid `a`, or
-    /// singular: `σ` is, numerically, an eigenvalue).
-    pub fn new(a: &CscMatrix<T>, sigma: T, opts: LuOptions) -> Result<Self, StatlaError> {
+impl<T: Real> LuSolver<T> {
+    /// SG1–SG3: check, form `M` and factorize it; `M` is returned to the
+    /// caller, which keeps it or drops it.
+    fn new(
+        a: &CscMatrix<T>,
+        sigma: T,
+        opts: LuOptions,
+    ) -> Result<(Self, CscMatrix<T>), StatlaError> {
         let n = check_input(a, sigma)?;
         a.check_invariants()
             .map_err(|e| StatlaError::Lu(LuError::Structure(e)))?;
@@ -322,37 +407,40 @@ impl<T: Real> ShiftInvert<T> {
         let m = shifted(a, sigma, false);
         let mut lu = xingo_sparse::Lu::<T>::new(opts);
         lu.factorize(&m).map_err(StatlaError::Lu)?;
-        Ok(Self {
-            sigma,
-            n,
-            lu,
-            work: SparseVec::new(n),
+        Ok((
+            Self {
+                n,
+                lu,
+                work: SparseVec::new(n),
+                r: vec![T::ZERO; n],
+                d: vec![T::ZERO; n],
+            },
             m,
-            r: vec![T::ZERO; n],
-            d: vec![T::ZERO; n],
-        })
+        ))
     }
 
-    /// The shift.
-    pub fn sigma(&self) -> T {
-        self.sigma
+    /// `y ← F⁻¹x` by `ftran` (row-indexed in, column-indexed out).
+    fn lu_solve(&mut self, x: &[T], y: &mut [T]) {
+        self.work = SparseVec::from_dense(x);
+        self.lu.ftran(&mut self.work);
+        for (i, yi) in y.iter_mut().enumerate() {
+            *yi = self.work.get(idx32(i));
+        }
     }
-}
 
-impl<T: Real> LinearOperator<T> for ShiftInvert<T> {
-    fn nrows(&self) -> usize {
-        self.n
-    }
-    fn ncols(&self) -> usize {
-        self.n
-    }
-    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+    /// Algorithm R with `M` from `m`.
+    fn apply<S: ShiftedColumns<T>>(
+        &mut self,
+        m: &S,
+        x: &[T],
+        y: &mut [T],
+    ) -> Result<(), OperatorError> {
         check_apply(self.n, x.len(), y.len())?;
         // R1.
         self.lu_solve(x, y);
         // R2.
         self.r.copy_from_slice(x);
-        sub_product(&self.m, y, &mut self.r, false);
+        sub_product(m, y, &mut self.r, false);
         // R3.
         let (r, mut d) = (core::mem::take(&mut self.r), core::mem::take(&mut self.d));
         self.lu_solve(&r, &mut d);
@@ -364,45 +452,102 @@ impl<T: Real> LinearOperator<T> for ShiftInvert<T> {
     }
 }
 
+/// `x ↦ (A − σI)⁻¹ x` for a square sparse `A`, by the threshold LU of
+/// `xingo-sparse` (`Lu<T>` over the columns of `A − σI`, factorized once),
+/// with one step of iterative refinement per application (Algorithm R: two
+/// solves and one product with `A − σI`, which the operator keeps). The
+/// operator of [`eigs_near`] (Algorithm SG of Chapter 12.6.2).
+#[derive(Debug)]
+pub struct ShiftInvert<T: Real = f64> {
+    sigma: T,
+    solver: LuSolver<T>,
+    /// `M = A − σI` (Algorithm R).
+    m: CscMatrix<T>,
+}
+
 impl<T: Real> ShiftInvert<T> {
-    /// `y ← F⁻¹x` by `ftran` (row-indexed in, column-indexed out).
-    fn lu_solve(&mut self, x: &[T], y: &mut [T]) {
-        self.work = SparseVec::from_dense(x);
-        self.lu.ftran(&mut self.work);
-        for (i, yi) in y.iter_mut().enumerate() {
-            *yi = self.work.get(idx32(i));
-        }
+    /// Factorize `A − σI`.
+    ///
+    /// # Errors
+    /// [`StatlaError::InvalidArgument`] (not square; options outside the
+    /// domain `xingo-sparse` asserts), [`StatlaError::NonFinite`] (`a`,
+    /// `sigma`), [`StatlaError::Lu`] (a structurally invalid `a`, or
+    /// singular: `σ` is, numerically, an eigenvalue).
+    pub fn new(a: &CscMatrix<T>, sigma: T, opts: LuOptions) -> Result<Self, StatlaError> {
+        let (solver, m) = LuSolver::new(a, sigma, opts)?;
+        Ok(Self { sigma, solver, m })
+    }
+
+    /// The shift.
+    pub fn sigma(&self) -> T {
+        self.sigma
     }
 }
 
-/// `x ↦ (A − σI)⁻¹ x` for a symmetric sparse `A` (lower triangle read), by
-/// `SupernodalLdl<T, K>` with no regularization; the inertia of `A − σI`
-/// is kept: by Sylvester's law it counts the eigenvalues below `σ`
-/// ([`SymShiftInvert::count_below`]) — a check ARPACK does not offer. Each
-/// application refines once (Algorithm R: two solves and one product with
-/// the kept lower triangle of `A − σI`). The operator of [`eigsh_near`]
-/// (Algorithm SI of Chapter 12.6.2).
+impl<T: Real> LinearOperator<T> for ShiftInvert<T> {
+    fn nrows(&self) -> usize {
+        self.solver.n
+    }
+    fn ncols(&self) -> usize {
+        self.solver.n
+    }
+    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+        self.solver.apply(&self.m, x, y)
+    }
+}
+
+/// The operator of [`eigs_near`]: [`ShiftInvert`] without the stored `M`,
+/// which it generates from the borrowed `A` (step R2′).
 #[derive(Debug)]
-pub struct SymShiftInvert<T: Real = f64, K: DenseKernel<T> = NaiveDense> {
-    sigma: T,
+struct NearLu<'a, T: Real> {
+    solver: LuSolver<T>,
+    m: FromA<'a, T>,
+}
+
+impl<'a, T: Real> NearLu<'a, T> {
+    fn new(a: &'a CscMatrix<T>, sigma: T, opts: LuOptions) -> Result<Self, StatlaError> {
+        // `M` is dropped here, once factorized.
+        let (solver, _) = LuSolver::new(a, sigma, opts)?;
+        Ok(Self {
+            solver,
+            m: FromA {
+                a,
+                sigma,
+                lower_only: false,
+            },
+        })
+    }
+}
+
+impl<T: Real> LinearOperator<T> for NearLu<'_, T> {
+    fn nrows(&self) -> usize {
+        self.solver.n
+    }
+    fn ncols(&self) -> usize {
+        self.solver.n
+    }
+    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+        self.solver.apply(&self.m, x, y)
+    }
+}
+
+/// The `LBLᵀ` of `M` with its inertia and the workspace of Algorithm R (no
+/// `M`).
+#[derive(Debug)]
+struct LdlSolver<T: Real, K: DenseKernel<T>> {
     n: usize,
     below: usize,
     ldl: SupernodalLdl<T, K>,
     num: NumericLdl<T>,
-    /// The lower triangle of `M = A − σI` (Algorithm R).
-    low: CscMatrix<T>,
     /// The residual `r` of step R2.
     r: Vec<T>,
 }
 
-impl<T: Real, K: DenseKernel<T>> SymShiftInvert<T, K> {
-    /// Analyze (own AMD ordering) and factorize `A − σI`.
-    ///
-    /// # Errors
-    /// [`StatlaError::InvalidArgument`] (not square), [`StatlaError::NonFinite`]
-    /// (`a`, `sigma`), [`StatlaError::Kkt`] (a structurally invalid `a`; a
-    /// zero pivot: `σ` is numerically an eigenvalue).
-    pub fn new(a: &CscMatrix<T>, sigma: T, kernel: K) -> Result<Self, StatlaError> {
+impl<T: Real, K: DenseKernel<T>> LdlSolver<T, K> {
+    /// SI1–SI4: check, form the lower triangle of `M`, factorize it and
+    /// count; the lower triangle is returned to the caller, which keeps it
+    /// or drops it.
+    fn new(a: &CscMatrix<T>, sigma: T, kernel: K) -> Result<(Self, CscMatrix<T>), StatlaError> {
         let n = check_input(a, sigma)?;
         a.check_invariants()
             .map_err(|e| StatlaError::Kkt(KktError::Structure(e)))?;
@@ -430,15 +575,66 @@ impl<T: Real, K: DenseKernel<T>> SymShiftInvert<T, K> {
             n,
             "(I1) the inertia counts every pivot"
         );
-        Ok(Self {
-            sigma,
-            n,
-            below: inertia.negative,
-            ldl,
-            num,
+        Ok((
+            Self {
+                n,
+                below: inertia.negative,
+                ldl,
+                num,
+                r: vec![T::ZERO; n],
+            },
             low,
-            r: vec![T::ZERO; n],
-        })
+        ))
+    }
+
+    /// Algorithm R with the lower triangle of `M` from `low`.
+    fn apply<S: ShiftedColumns<T>>(
+        &mut self,
+        low: &S,
+        x: &[T],
+        y: &mut [T],
+    ) -> Result<(), OperatorError> {
+        check_apply(self.n, x.len(), y.len())?;
+        // R1.
+        y.copy_from_slice(x);
+        self.ldl.solve(&self.num, y);
+        // R2.
+        self.r.copy_from_slice(x);
+        sub_product(low, y, &mut self.r, true);
+        // R3.
+        self.ldl.solve(&self.num, &mut self.r);
+        for (yi, &di) in y.iter_mut().zip(&self.r) {
+            *yi += di;
+        }
+        Ok(())
+    }
+}
+
+/// `x ↦ (A − σI)⁻¹ x` for a symmetric sparse `A` (lower triangle read), by
+/// `SupernodalLdl<T, K>` with no regularization; the inertia of `A − σI`
+/// is kept: by Sylvester's law it counts the eigenvalues below `σ`
+/// ([`SymShiftInvert::count_below`]) — a check ARPACK does not offer. Each
+/// application refines once (Algorithm R: two solves and one product with
+/// the kept lower triangle of `A − σI`). The operator of [`eigsh_near`]
+/// (Algorithm SI of Chapter 12.6.2).
+#[derive(Debug)]
+pub struct SymShiftInvert<T: Real = f64, K: DenseKernel<T> = NaiveDense> {
+    sigma: T,
+    solver: LdlSolver<T, K>,
+    /// The lower triangle of `M = A − σI` (Algorithm R).
+    low: CscMatrix<T>,
+}
+
+impl<T: Real, K: DenseKernel<T>> SymShiftInvert<T, K> {
+    /// Analyze (own AMD ordering) and factorize `A − σI`.
+    ///
+    /// # Errors
+    /// [`StatlaError::InvalidArgument`] (not square), [`StatlaError::NonFinite`]
+    /// (`a`, `sigma`), [`StatlaError::Kkt`] (a structurally invalid `a`; a
+    /// zero pivot: `σ` is numerically an eigenvalue).
+    pub fn new(a: &CscMatrix<T>, sigma: T, kernel: K) -> Result<Self, StatlaError> {
+        let (solver, low) = LdlSolver::new(a, sigma, kernel)?;
+        Ok(Self { sigma, solver, low })
     }
 
     /// The shift.
@@ -450,31 +646,54 @@ impl<T: Real, K: DenseKernel<T>> SymShiftInvert<T, K> {
     /// `A − σI`).
     #[must_use]
     pub fn count_below(&self) -> usize {
-        self.below
+        self.solver.below
     }
 }
 
 impl<T: Real, K: DenseKernel<T>> LinearOperator<T> for SymShiftInvert<T, K> {
     fn nrows(&self) -> usize {
-        self.n
+        self.solver.n
     }
     fn ncols(&self) -> usize {
-        self.n
+        self.solver.n
     }
     fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
-        check_apply(self.n, x.len(), y.len())?;
-        // R1.
-        y.copy_from_slice(x);
-        self.ldl.solve(&self.num, y);
-        // R2.
-        self.r.copy_from_slice(x);
-        sub_product(&self.low, y, &mut self.r, true);
-        // R3.
-        self.ldl.solve(&self.num, &mut self.r);
-        for (yi, &di) in y.iter_mut().zip(&self.r) {
-            *yi += di;
-        }
-        Ok(())
+        self.solver.apply(&self.low, x, y)
+    }
+}
+
+/// The operator of [`eigsh_near`]: [`SymShiftInvert`] without the stored
+/// lower triangle, which it generates from the borrowed `A` (step R2′).
+#[derive(Debug)]
+struct NearLdl<'a, T: Real, K: DenseKernel<T>> {
+    solver: LdlSolver<T, K>,
+    low: FromA<'a, T>,
+}
+
+impl<'a, T: Real, K: DenseKernel<T>> NearLdl<'a, T, K> {
+    fn new(a: &'a CscMatrix<T>, sigma: T, kernel: K) -> Result<Self, StatlaError> {
+        // The lower triangle is dropped here, once factorized.
+        let (solver, _) = LdlSolver::new(a, sigma, kernel)?;
+        Ok(Self {
+            solver,
+            low: FromA {
+                a,
+                sigma,
+                lower_only: true,
+            },
+        })
+    }
+}
+
+impl<T: Real, K: DenseKernel<T>> LinearOperator<T> for NearLdl<'_, T, K> {
+    fn nrows(&self) -> usize {
+        self.solver.n
+    }
+    fn ncols(&self) -> usize {
+        self.solver.n
+    }
+    fn apply(&mut self, x: &[T], y: &mut [T]) -> Result<(), OperatorError> {
+        self.solver.apply(&self.low, x, y)
     }
 }
 
@@ -499,8 +718,8 @@ pub fn eigsh_near<T: Real>(
         opts,
         true,
     )?;
-    let mut op = SymShiftInvert::<T, NaiveDense>::new(a, sigma, NaiveDense)?;
-    let below = op.count_below();
+    let mut op = NearLdl::<T, NaiveDense>::new(a, sigma, NaiveDense)?;
+    let below = op.solver.below;
     let mut f = eigsh(&mut op, k, Which::LargestMagnitude, opts)?;
     // SI6.
     for v in &mut f.values {
@@ -537,7 +756,7 @@ pub fn eigs_near<T: Real>(
         tol_scale: TolScale::Column,
         ..LuOptions::for_scalar::<T>()
     };
-    let mut op = ShiftInvert::new(a, sigma, lu_opts)?;
+    let mut op = NearLu::new(a, sigma, lu_opts)?;
     let mut f = eigs(&mut op, k, Which::LargestMagnitude, opts)?;
     // SG6.
     let n = a.n_rows();
@@ -711,6 +930,98 @@ mod tests {
                     .max((si - (th.re * z[i] + th.im * y[i])).abs());
             }
             assert!(e < 1e-12, "{c}: {e}");
+        }
+    }
+
+    /// A nonsymmetric matrix with missing diagonal entries, a diagonal entry
+    /// equal to the shift (it cancels) and both triangles.
+    fn awkward(n: usize, sigma: f64) -> CscMatrix<f64> {
+        let mut t = Triplets::new(n, n);
+        for i in 0..n {
+            match i % 3 {
+                0 => {}                                 // no diagonal entry
+                1 => t.push(i as u32, i as u32, sigma), // cancels in A − σI
+                _ => t.push(i as u32, i as u32, 3.0 + i as f64 / 7.0),
+            }
+            if i + 1 < n {
+                t.push((i + 1) as u32, i as u32, -1.25 + (i % 5) as f64 / 3.0);
+                t.push(i as u32, (i + 1) as u32, 0.5 - (i % 4) as f64 / 9.0);
+            }
+            if i + 4 < n {
+                t.push((i + 4) as u32, i as u32, 0.3);
+            }
+        }
+        t.to_csc().unwrap()
+    }
+
+    /// Lemma B and issue xingo-statla#3: the private operators of the
+    /// drivers keep no copy of `M` and apply bit for bit as the public ones,
+    /// so the drivers return the same bits.
+    #[test]
+    fn near_drivers_keep_no_copy_and_the_same_bits() {
+        let x: Vec<f64> = (0..40)
+            .map(|i| ((i * 37 % 11) as f64 - 5.0) / 3.0)
+            .collect();
+        let bits = |v: &[f64]| v.iter().map(|z| z.to_bits()).collect::<Vec<_>>();
+        // General: LU.
+        for (a, sigma) in [
+            (lap1d(40, false), 0.3),
+            (lap1d(40, false), 0.0),
+            (awkward(40, 0.7), 0.7),
+        ] {
+            let opts = LuOptions {
+                tol_scale: TolScale::Column,
+                ..LuOptions::for_scalar::<f64>()
+            };
+            let mut stored = ShiftInvert::new(&a, sigma, opts).unwrap();
+            let mut near = NearLu::new(&a, sigma, opts).unwrap();
+            let (mut y1, mut y2) = (vec![0.0; 40], vec![0.0; 40]);
+            stored.apply(&x, &mut y1).unwrap();
+            near.apply(&x, &mut y2).unwrap();
+            assert_eq!(bits(&y1), bits(&y2), "LU σ = {sigma}");
+            let o = EigsOptions::default();
+            let f1 = eigs(&mut stored, 4, Which::LargestMagnitude, &o).unwrap();
+            let f2 = eigs(&mut near, 4, Which::LargestMagnitude, &o).unwrap();
+            assert_eq!(f1.stats, f2.stats);
+            for (p, q) in f1.values.iter().zip(&f2.values) {
+                assert_eq!(
+                    (p.re.to_bits(), p.im.to_bits()),
+                    (q.re.to_bits(), q.im.to_bits())
+                );
+            }
+            let (v1, v2) = (f1.vectors_re.unwrap(), f2.vectors_re.unwrap());
+            assert_eq!(bits(&v1.data), bits(&v2.data));
+        }
+        // Symmetric: LBLᵀ, from the lower triangle or from the whole matrix
+        // (the upper part is skipped), and a shift on a diagonal entry.
+        let mut sym = lap1d(40, false);
+        for (j, v) in sym.val.iter_mut().enumerate() {
+            if *v == 2.0 && j % 2 == 0 {
+                *v = 1.5; // diagonal 1.5 at some columns: cancels for σ = 1.5
+            }
+        }
+        for (a, sigma) in [
+            (lap1d(40, true), 0.3),
+            (lap1d(40, false), 1.01),
+            (sym.clone(), 1.5),
+            (sym, 0.0),
+        ] {
+            let mut stored = SymShiftInvert::<f64>::new(&a, sigma, NaiveDense).unwrap();
+            let mut near = NearLdl::<f64, NaiveDense>::new(&a, sigma, NaiveDense).unwrap();
+            assert_eq!(stored.count_below(), near.solver.below);
+            let (mut y1, mut y2) = (vec![0.0; 40], vec![0.0; 40]);
+            stored.apply(&x, &mut y1).unwrap();
+            near.apply(&x, &mut y2).unwrap();
+            assert_eq!(bits(&y1), bits(&y2), "LBLᵀ σ = {sigma}");
+            let o = EigsOptions::default();
+            let f1 = eigsh(&mut stored, 4, Which::LargestMagnitude, &o).unwrap();
+            let f2 = eigsh(&mut near, 4, Which::LargestMagnitude, &o).unwrap();
+            assert_eq!(f1.stats, f2.stats);
+            assert_eq!(bits(&f1.values), bits(&f2.values));
+            assert_eq!(
+                bits(&f1.vectors.unwrap().data),
+                bits(&f2.vectors.unwrap().data)
+            );
         }
     }
 
