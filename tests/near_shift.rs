@@ -462,7 +462,7 @@ fn eigs_near_with_an_eigenvalue_ulps_from_sigma() {
     header();
     let mut accepted = 0;
     for (what, sigma) in shifts() {
-        let o = match ShiftInvert::new(&a, sigma, LuOptions::for_scalar::<f64>()) {
+        let o = match ShiftInvert::new(&a, sigma, eigs_near_lu_options()) {
             Err(e) => Outcome::Refused(e),
             Ok(mut op) => {
                 accepted += 1;
@@ -518,11 +518,11 @@ fn eigs_near_with_an_eigenvalue_ulps_from_sigma() {
         };
         print("convdiff1d_201 (eigs_near)", &what, &o);
         check("convdiff1d_201", &what, sigma, &o);
-        // The threshold LU of `eigs_near` (`LuOptions::for_scalar`, an
-        // *absolute* pivot tolerance `τ_abs = 10⁻¹⁰`) declares `A − σI`
-        // singular once `|σ − λ⋆|` is below about `τ_abs`: accepted down to
-        // `2⁻³⁶ ≈ 1.5·10⁻¹¹`, refused from `2⁻⁴⁰` on (measured; the pivot is
-        // not `|σ − λ⋆|` itself; see the chapter).
+        // The threshold LU of `eigs_near` (`τ_j = 10⁻¹⁰ max_i |m_ij|`, per
+        // column, columns of norm ≈ 2) declares `A − σI` singular once
+        // `|σ − λ⋆|` is below about `τ_j`: accepted down to `2⁻³⁶ ≈
+        // 1.5·10⁻¹¹`, refused from `2⁻⁴⁰` on (measured; the pivot is not
+        // `|σ − λ⋆|` itself; see the chapter).
         let delta = (sigma - 2.0).abs();
         match &o {
             Outcome::Refused(e) => {
@@ -535,6 +535,14 @@ fn eigs_near_with_an_eigenvalue_ulps_from_sigma() {
         }
     }
     assert!(accepted >= 12, "{accepted} accepted");
+}
+
+/// The options `eigs_near` factorizes with (Chapter 12.6.2, SG3).
+fn eigs_near_lu_options() -> LuOptions {
+    LuOptions {
+        tol_scale: TolScale::Column,
+        ..LuOptions::for_scalar::<f64>()
+    }
 }
 
 /// One run of `ShiftInvert` with the options `opts` and `eigs` (`k = 1`)
@@ -574,12 +582,13 @@ fn lu_run(
 /// nonnormal tridiagonal and on the same matrix scaled by `2⁻⁴⁰`
 /// (exactly):
 ///
-/// * `eigs_near` (`LuOptions::for_scalar`: `TolScale::Absolute`, `τ_abs =
-///   10⁻¹⁰`, `ε_drop = 10⁻¹²`) refuses every shift of the scaled matrix —
-///   its tolerances are absolute;
-/// * with `TolScale::Column` the scaled matrix behaves as the unscaled one
-///   (the same refusals; `η ≤ 2u`, `λ⋆` to `10⁻¹⁴‖A‖` and criterion (b)
-///   wherever accepted);
+/// * `eigs_near` (tolerances per column since task I01, Q2) behaves on the
+///   scaled matrix as on the unscaled one: the same shifts refused, and
+///   the values scaled by `2⁻⁴⁰` exactly (with the absolute tolerances of
+///   `LuOptions::for_scalar` alone it refused every shift of the scaled
+///   matrix — checked here too, as the reason for the change);
+/// * so does `ShiftInvert` with those options (`η ≤ 2u`, `λ⋆` to
+///   `10⁻¹⁴‖A‖` and criterion (b) wherever accepted);
 /// * with no absolute pivot tolerance at all (`τ_abs = 0`) the LU accepts
 ///   `σ` down to one ulp of `λ⋆`, and there Algorithm R is *not* enough:
 ///   `η` reaches `3.9·10³ u` at `|σ − λ⋆| = 2⁻⁴⁰`, and a second refinement
@@ -601,6 +610,8 @@ fn lu_shift_invert_beyond_the_default_refusals() {
         ..base
     };
     let mut accepted = [Vec::new(), Vec::new()];
+    let mut unscaled_values = Vec::new();
+    let mut unscaled_values_at = 0;
     for (si, scale) in [1.0, 2f64.powi(-40)].into_iter().enumerate() {
         let mut a = tridiag(N, p, &permutation(N, 9));
         for v in &mut a.val {
@@ -610,12 +621,29 @@ fn lu_shift_invert_beyond_the_default_refusals() {
         for (what, s) in shifts() {
             let sigma = s * scale;
             let default = eigs_near(&a, 3, sigma, &EigsOptions::default());
-            if si == 1 {
-                assert!(
-                    matches!(default, Err(StatlaError::Lu(_))),
-                    "scaled, σ = {what}: {:?}",
-                    default.map(|f| f.values)
-                );
+            let values = default.as_ref().ok().map(|f| f.values.clone());
+            if si == 0 {
+                unscaled_values.push(values);
+            } else {
+                // The same outcome as unscaled, the values scaled exactly.
+                let before = &unscaled_values[unscaled_values_at];
+                unscaled_values_at += 1;
+                match (before, &values) {
+                    (None, None) => {}
+                    (Some(v0), Some(v1)) => {
+                        for (x, y) in v0.iter().zip(v1) {
+                            assert_eq!(
+                                (x.re * scale, x.im * scale),
+                                (y.re, y.im),
+                                "scaled, σ = {what}"
+                            );
+                        }
+                    }
+                    _ => panic!("scaled, σ = {what}: {before:?} vs {values:?}"),
+                }
+                // The absolute tolerances alone refuse every shift here.
+                let abs = ShiftInvert::new(&a, sigma, base);
+                assert!(matches!(abs, Err(StatlaError::Lu(_))), "σ = {what}");
             }
             match lu_run(&a, sigma, star, anorm, column) {
                 Err(e) => {
@@ -659,6 +687,38 @@ fn lu_shift_invert_beyond_the_default_refusals() {
                 eta2 > 0.5 * eta1,
                 "a second step helped: {eta1:e} → {eta2:e}"
             );
+        }
+    }
+}
+
+/// The analogue for `eigsh_near` (task I01, Q2): its `LBLᵀ` tests pivots
+/// relatively (`SupernodalOptions::zero_pivot_tol`), so the permuted 1-D
+/// Laplacian scaled by `2⁻⁴⁰` gives the same refusals, the same
+/// `count_below` and the values scaled exactly.
+#[test]
+fn eigsh_near_is_invariant_under_scaling() {
+    let scale = 2f64.powi(-40);
+    let a = tridiag(N, 0.0, &permutation(N, 5));
+    let mut b = a.clone();
+    for v in &mut b.val {
+        *v *= scale;
+    }
+    for (what, s) in shifts() {
+        let r0 = eigsh_near(&a, 3, s, &EigsOptions::default());
+        let r1 = eigsh_near(&b, 3, s * scale, &EigsOptions::default());
+        match (r0, r1) {
+            (Ok((f0, c0)), Ok((f1, c1))) => {
+                assert_eq!(c0, c1, "σ = {what}");
+                for (x, y) in f0.values.iter().zip(&f1.values) {
+                    assert_eq!(x * scale, *y, "σ = {what}");
+                }
+            }
+            (Err(_), Err(_)) => {}
+            (r0, r1) => panic!(
+                "σ = {what}: unscaled {:?}, scaled {:?}",
+                r0.map(|f| f.1),
+                r1.map(|f| f.1)
+            ),
         }
     }
 }

@@ -45,9 +45,17 @@
 //!
 //! ## Algorithm SG (general, [`eigs_near`])
 //! SG1–SG2 as SI1–SI2 on the whole of `M`. SG3: `Lu<T>` with
-//! `LuOptions::for_scalar::<T>()` (the defaults of `xingo-sparse`; `M`
-//! is the "basis" whose columns are those of `M`); singular is
-//! [`StatlaError::Lu`]. SG5: [`crate::eigs()`] with `LM` on `x ↦ M⁻¹x`
+//! `LuOptions { tol_scale: TolScale::Column, ..LuOptions::for_scalar::<T>() }`
+//! (the defaults of `xingo-sparse` with the pivot and drop tolerances
+//! measured against each column of `M`, `τ_j = τ_abs·max_i |m_ij|`; `M` is
+//! the "basis" whose columns are those of `M`); singular is
+//! [`StatlaError::Lu`]. *Why per column* (task I01, decision of Q2): with
+//! the absolute defaults (`τ_abs = 10⁻¹⁰`, `ε_drop = 10⁻¹²`) every shift of
+//! a matrix of small norm was refused — all of them for `A` scaled by
+//! `2⁻⁴⁰` — and the refusals near an eigenvalue depended on the units of
+//! `A`. Per column, a scaling of `A` by a power of two changes no pivot
+//! decision: the refusals are those of the unscaled matrix, at `|σ − λ|`
+//! below about `τ_abs‖M e_j‖` (measured below, item 2). SG5: [`crate::eigs()`] with `LM` on `x ↦ M⁻¹x`
 //! (`ftran`: row-indexed in, column-indexed out; Algorithm R). SG6: `λ = σ + 1/ν`
 //! computed by complex division. `1/ν` *conjugates the imaginary part's
 //! sign*, so a pair `ν, ν̄` (`+i` first) maps to `λ̄, λ`: the two values,
@@ -98,10 +106,12 @@
 //!    nothing (`η ≤ 1.2u` after it). The value nearest `σ` comes out
 //!    *exact* and its pair meets the residual criterion of 12.6 at every
 //!    distance.
-//! 2. *Threshold LU (`eigs_near`).* `LuOptions::for_scalar` has an
-//!    *absolute* pivot tolerance (`τ_abs = 10⁻¹⁰`): `A − σI` is accepted
-//!    down to `δ = 2⁻³⁶ ≈ 1.5·10⁻¹¹` (`η ≤ 1.4u`, `λ⋆` exact) and refused
-//!    ([`StatlaError::Lu`], "singular") from `2⁻⁴⁰` on. Below that point
+//! 2. *Threshold LU (`eigs_near`).* With the pivot tolerance per column
+//!    (`τ_j = 10⁻¹⁰·max_i |m_ij|`, columns of norm `≈ 2` here) `A − σI` is
+//!    accepted down to `δ = 2⁻³⁶ ≈ 1.5·10⁻¹¹` (`η ≤ 1.4u`, `λ⋆` exact) and
+//!    refused ([`StatlaError::Lu`], "singular") from `2⁻⁴⁰` on — the same
+//!    refusals as the absolute tolerance of the earlier edition gave on
+//!    this matrix. Below that point
 //!    one step is *not* enough: with `τ_abs = 0` the LU accepts `σ` down
 //!    to one ulp, and `η` reaches `3.9·10³ u` at `δ = 2⁻⁴⁰` (`2.4·10² u`
 //!    at `2⁻⁴⁴`), and a second step does not lower it (its correction is
@@ -109,10 +119,12 @@
 //!    `γ κ(M) u` is small. So the documented error of the defaults is the
 //!    right answer there, not a second step nor a stopping test on the
 //!    correction — which would only detect the failure the refusal
-//!    already reports. (Because `τ_abs` is absolute, `eigs_near` also
-//!    refuses *every* shift of a matrix scaled by `2⁻⁴⁰`; with
-//!    `TolScale::Column` it behaves as the unscaled one, with the same
-//!    refusals. A question for the defaults, task I01.)
+//!    already reports. (With the absolute tolerance of the earlier
+//!    edition `eigs_near` refused *every* shift of the same matrix scaled
+//!    by `2⁻⁴⁰`; per column it behaves as the unscaled one, with the same
+//!    refusals and the same results. The `LBLᵀ` of `eigsh_near` already
+//!    tests its pivots relatively, `SupernodalOptions::zero_pivot_tol`;
+//!    measured: scaled by `2⁻⁴⁰` it gives the same refusals.)
 //! 3. *The other pairs.* The `k − 1` pairs farther from `σ` lose accuracy
 //!    as `σ` approaches `λ⋆`, whatever the solve: the Krylov process on
 //!    `M⁻¹` rounds at the level `u·|ν₁|`, `ν₁ = 1/(λ⋆ − σ)`, so pair `i`
@@ -150,6 +162,7 @@
 use xingo_sparse::{
     Amd, Col, CscMatrix, DenseKernel, KktError, KktForm, KktSolver, LuError, LuFactor, LuOptions,
     NaiveDense, NumericLdl, Real, Regularization, SparseVec, SupernodalLdl, SupernodalOptions,
+    TolScale,
 };
 
 use crate::StatlaError;
@@ -496,7 +509,9 @@ pub fn eigsh_near<T: Real>(
 }
 
 /// The `k` eigenvalues of the general `A` nearest the real shift `σ`, by
-/// [`eigs()`] on [`ShiftInvert`] (`LuOptions::for_scalar::<T>()`), mapped
+/// [`eigs()`] on [`ShiftInvert`] (`LuOptions::for_scalar::<T>()` with
+/// `TolScale::Column`: the singularity test is relative to the columns of
+/// `A − σI`, so scaling `A` does not change which shifts are refused), mapped
 /// back by `λ = σ + 1/ν`, nearest first; conjugate pairs keep the `+i`
 /// member first.
 ///
@@ -516,7 +531,12 @@ pub fn eigs_near<T: Real>(
         opts,
         false,
     )?;
-    let mut op = ShiftInvert::new(a, sigma, LuOptions::for_scalar::<T>())?;
+    // SG3: the defaults, with every tolerance measured per column.
+    let lu_opts = LuOptions {
+        tol_scale: TolScale::Column,
+        ..LuOptions::for_scalar::<T>()
+    };
+    let mut op = ShiftInvert::new(a, sigma, lu_opts)?;
     let mut f = eigs(&mut op, k, Which::LargestMagnitude, opts)?;
     // SG6.
     let n = a.n_rows();
