@@ -92,7 +92,8 @@
 //! may not suffice (and the factorization would usually have failed with
 //! a zero pivot). *Measured* (`l34-tables.md`): with R2–R3 the residual on
 //! `A` satisfies the criterion of `eigsh`/`eigs`, `≤ (τ + c_K·ncv·u)‖A‖`, on
-//! every fixture.
+//! every fixture (runs of few restarts; for long runs Chapter 12.6 adds the
+//! measured factor `1 + √R/8`, not measured here).
 //!
 //! *σ near an eigenvalue* (issue xingo-statla#1; `tests/near_shift.rs`).
 //! Measured on tridiagonal matrices of order 201 with the eigenvalue `λ⋆ =

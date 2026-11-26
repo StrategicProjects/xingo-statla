@@ -221,23 +221,30 @@ fn coupling_check_on_a_convection_dominated_operator() {
     assert!(worst <= C_K, "residual ratio {worst}");
 }
 
-/// Grcar matrices, the classical worst case (reported, not asserted
-/// against `c_K`): with `ncv = 40` all 16 values converge, but the residual
-/// ratio of criterion (b) reaches `12` at `n = 200` (`LM`) against the
-/// norm bound — above the `c_K = 8` measured on the fixtures (see the
-/// chapter). Asserted: convergence and a ratio below `4 c_K`; the coupling
-/// check fires on these runs too, without changing the outcome.
+/// Grcar matrices, the classical worst case: the residual ratio of
+/// criterion (b) grows with the number `R` of restarts (Chapter 12.6, "The
+/// constant", issue xingo-statla#9) and is asserted against the restart
+/// form `c_K (1 + √R/8)` of the guarantee — and, as before, against `4 c_K`,
+/// which is the tighter of the two only at Grcar(200) `LM` (988 restarts,
+/// ratio `12.1`; the restart form gives `39.4` there). Measured: `3.78`
+/// (`R = 108`), `3.56` (`103`), `12.10` (`988`), `3.81` (`142`), against
+/// `18.4`, `18.1`, `39.4`, `19.9`. The coupling check fires on these runs
+/// too, without changing the outcome.
 #[test]
 #[cfg_attr(
     debug_assertions,
     ignore = "slow in debug builds (Grcar 200 takes ~1000 restarts): run with --ignored"
 )]
-fn grcar_residuals_are_reported() {
+fn grcar_residuals_within_the_restart_form() {
     for n in [100usize, 200] {
         let a = grcar(n, 3);
         for which in [Which::LargestMagnitude, Which::LargestImag] {
-            let (_, worst, _) = run(&format!("grcar_{n}"), &a, which, 16, 40);
-            assert!(worst <= 4.0 * C_K, "grcar {n} {which:?}: {worst}");
+            let (_, worst, restarts) = run(&format!("grcar_{n}"), &a, which, 16, 40);
+            let form = C_K * (1.0 + (restarts as f64).sqrt() / 8.0);
+            assert!(
+                worst <= form && worst <= 4.0 * C_K,
+                "grcar {n} {which:?}: {worst} after {restarts} restarts (form {form})"
+            );
         }
     }
 }

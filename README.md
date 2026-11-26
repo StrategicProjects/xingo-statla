@@ -252,7 +252,7 @@ dimensions, `ncv` the Krylov dimension.
 | `rsvd`: the HMT expected error | the mean over 40 seeds below the bound | 0.19–0.63 of the bound (worst single run 0.66) |
 | `svds`: residual of every triplet | `‖(Av − σu; Aᵀu − σv)‖ ≤ (τ + 8·ncv·u)·σ₁` (`c_G = 8`) | `2.30·ncv·u·σ₁` |
 | `svds`: singular values, against a certified construction | `≤ 10⁻¹³·σ₁` where the gap is `≥ 10⁻⁸σ₁` | `3.6·10⁻¹⁵·σ₁` |
-| `eigsh`/`eigs`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) | `2.44·ncv·u·‖A‖` |
+| `eigsh`/`eigs`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u·(1 + √R/8))·‖A‖` (`c_K = 8`, `R` restarts; the factor is measured, and the fixtures, with few restarts, are asserted without it) | `2.44·ncv·u·‖A‖` on the fixtures; `0.42·(8 + √R)·ncv·u·‖A‖` for `eigs` on long runs (Grcar, 1-D Laplacian); `eigsh` exceeds it on the Laplacian of order 2000 (Chapter 12.6) |
 | `eigsh`/`eigs`/shift-invert: eigenvalues, against ARPACK | `≤ 10⁻¹⁰` relative where the gap is `≥ 10⁻⁶‖A‖` | `9.2·10⁻¹⁴` |
 | shift-invert: residual on `A` | as `eigsh`/`eigs` | `2.23·ncv·u·‖A‖` (`114` without the refinement step) |
 | shift-invert: backward error of each solve | `≤ 2u` | `0.73u` (up to `526u` without refinement) |
