@@ -56,8 +56,10 @@
 //!      components of the eigenvector of `H` are left out). The candidates
 //!      are ordered by `which` (a conjugate pair counts as two values,
 //!      adjacent, `+i` first; `BE` alternates the high and the low end,
-//!      high first; ties are broken by ARPACK's secondary key — `LM`↔`LR`,
-//!      `SM`↔`SR`, `LI`→`LM`, `SI`→`SM` — then by position); the
+//!      high first; ties are broken by a secondary key — `LM`↔`LR`,
+//!      `SM`↔`SR`, `LI`→`LM`, `SI`→`SM` as ARPACK's `dngets`, and
+//!      `LA`/`BE`→`LM`, `SA`→`SM`, which are this crate's own (`dsgets` has
+//!      no secondary key) — then by position); the
 //!      **wanted** are the first `k`.
 //! KS5. \[Test.\] A wanted value is converged when it is locked, or when
 //!      `ρ ≤ τ·max(ε^{2/3}, |θ|)` (ARPACK's test, `|θ|` the modulus). If all
@@ -136,7 +138,8 @@
 //! Hence the acceptance form `‖A y − θ y‖ ≤ (τ + c_K·m·u)·‖A‖` (when `‖A‖ ≥
 //! ε^{2/3}`), **measured on runs of few restarts** — every Matrix Market
 //! fixture and every acceptance test. For symmetric `A` this bounds the
-//! distance of `θ` to the spectrum (Parlett, Thm. 4.5.1); for a general
+//! distance of `θ` to the spectrum (Parlett, Thm. 4.5.1, number not
+//! verified); for a general
 //! `A` the eigenvalue error is that times its condition number.
 //!
 //! **Long runs** (issue xingo-statla#9, task I02). The rounding term grows
@@ -264,8 +267,8 @@
 //! ‖A y − θ y‖ ≤ (1 + γ_{2n+1}) ρ̂ + γ_3 (‖ŵ‖ + √2 |θ|) + η_op .
 //! ```
 //!
-//! *Proof.* Entrywise, `r̂ = (ŵ − θ y) + e` with `|e| ≤ γ_3(|ŵ| + |a||y|
-//! + |b||y|)` (each entry is a sum of three terms, two of them products,
+//! *Proof.* Entrywise, `r̂ = (ŵ − θ y) + e` with
+//! `|e| ≤ γ_3(|ŵ| + |a||y| + |b||y|)` (each entry is a sum of three terms, two of them products,
 //! each operation rounded once: the standard model and the bound for
 //! sums of products of Higham, *Accuracy and Stability*, ch. 3), so `‖e‖ ≤
 //! γ_3(‖ŵ‖ + (|a| + |b|)‖y‖) ≤ γ_3(‖ŵ‖ + √2|θ|)`. `A y − θ y = (ŵ − θ y)
@@ -309,13 +312,25 @@
 //! * `BE` returns the values in its own wanted order (high, low, high, …).
 //!
 //! ## References
-//! Stewart, "A Krylov–Schur algorithm for large eigenproblems", SIMAX 23
-//! (2001); Wu & Simon, "Thick-restart Lanczos method for large symmetric
-//! eigenvalue problems", SIMAX 22 (2000); Lehoucq, Sorensen & Yang, *ARPACK
-//! Users' Guide*, SIAM (1998) (`dsaupd`/`dnaupd`: `which`, `ncv`, the test
-//! `‖r‖ ≤ tol·max(ε^{2/3}, |θ|)`, `nev′`); Sorensen, SIMAX 13 (1992);
-//! Parlett, *The Symmetric Eigenvalue Problem* (1998); Daniel, Gragg,
-//! Kaufman & Stewart (1976). Cited from memory.
+//! G. W. Stewart, "A Krylov–Schur algorithm for large eigenproblems",
+//! SIAM J. Matrix Anal. Appl. 23(3), 601–614, doi:10.1137/S0895479800371529
+//! (cited as 2001; Crossref dates the issue 2002); K. Wu & H. Simon,
+//! "Thick-restart Lanczos method for large symmetric eigenvalue problems",
+//! SIAM J. Matrix Anal. Appl. 22(2), 602–616 (2000),
+//! doi:10.1137/S0895479898334605; R. B. Lehoucq, D. C. Sorensen & C. Yang,
+//! *ARPACK Users' Guide*, SIAM (1998), doi:10.1137/1.9780898719628
+//! (`dsaupd`/`dnaupd`: `which`, `ncv`, `nev′`; the test is `bounds(i) ≤
+//! tol·max(eps23, |θ_i|)`, `eps23 = ε^{2/3}`, in `dsconv.f`/`dnconv.f` of
+//! arpack-ng, `|θ|` the modulus in `dnconv`, `ε = dlamch('E') = 2⁻⁵³`);
+//! D. C. Sorensen, "Implicit application of polynomial filters in a k-step
+//! Arnoldi method", SIAM J. Matrix Anal. Appl. 13(1), 357–385 (1992),
+//! doi:10.1137/0613025; B. N. Parlett, *The Symmetric Eigenvalue Problem*,
+//! SIAM Classics 20 (1998), doi:10.1137/1.9781611971163; Daniel, Gragg,
+//! Kaufman & Stewart, Math. Comp. 30(136), 772–795 (1976),
+//! doi:10.1090/S0025-5718-1976-0431641-8. Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents (and, for
+//! ARPACK, its Fortran sources), task I03. *Not verified:* Parlett's
+//! Thm. 4.5.1 (only the chapter titles were reachable: ch. 4, "Simple
+//! vector iterations"), the online date of Stewart's article.
 
 use xingo_sparse::{DenseBlock, Real};
 
@@ -632,9 +647,12 @@ fn before<T: Real>(which: Which, a: (T, T), b: (T, T)) -> bool {
 }
 
 /// The tie-break of `which`: ARPACK's `dngets` pre-sorts by this key
-/// before the stable sort by `which` (`LM`↔`LR`, `SM`↔`SR`, `LI`→`LM`,
-/// `SI`→`SM`), so that equal keys (a spectrum of real values under `LI`,
-/// `±λ` under `LM`) are resolved the same way at every restart.
+/// before the sort by `which` (`LM`↔`LR`, `SM`↔`SR`, `LI`→`LM`,
+/// `SI`→`SM`; checked against `dngets.f` of arpack-ng, task I03), so that
+/// equal keys (a spectrum of real values under `LI`, `±λ` under `LM`) are
+/// resolved the same way at every restart. The keys of `LA`, `SA` and `BE`
+/// are this crate's: ARPACK's `dsgets` sorts by `which` alone (`BE` by `LA`,
+/// then a block swap of the two ends).
 fn tie_break(which: Which) -> Which {
     match which {
         Which::LargestMagnitude => Which::LargestReal,

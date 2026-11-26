@@ -179,9 +179,9 @@
 //! Householder), §6.5 (updating). Gill, Golub, Murray & Saunders, "Methods
 //! for modifying matrix factorizations", Math. Comp. 28 (1974). Saunders,
 //! "Large-scale linear programming using the Cholesky factorization",
-//! Stanford report (1972). Stewart, "The effects of rounding error on an
+//! Report STAN-CS-72-252, Stanford (1972). Stewart, "The effects of rounding error on an
 //! algorithm for downdating a Cholesky factorization", J. IMA 23 (1979).
-//! Dongarra, Bunch, Moler & Stewart, *LINPACK Users' Guide*, SIAM (1979),
+//! Dongarra, Moler, Bunch & Stewart, *LINPACK Users' Guide*, SIAM (1979),
 //! ch. 10 (`dchud`, `dchdd`). Daniel, Gragg, Kaufman & Stewart,
 //! "Reorthogonalization and stable algorithms for updating the Gram–Schmidt
 //! QR factorization", Math. Comp. 30 (1976). Hammarling & Lucas, "Updating
@@ -189,18 +189,32 @@
 //! 2008.111 (2008). Higham, *Accuracy and Stability of Numerical
 //! Algorithms*, 2nd ed. (2002), ch. 10 and 19. Halko, Martinsson & Tropp,
 //! "Finding structure with randomness", SIAM Review 53 (2011). Golub &
-//! Kahan, SIAM J. Numer. Anal. 2 (1965). Baglama & Reichel, "Augmented
+//! Kahan, J. SIAM Ser. B Numer. Anal. 2 (1965). Baglama & Reichel, "Augmented
 //! implicitly restarted Lanczos bidiagonalization methods", SISC 27
-//! (2005). Hestenes, J. SIAM 6 (1958); Demmel & Veselić, SIMAX 13 (1992).
+//! (2005). Hestenes, J. SIAM 6 (1958); Demmel & Veselić, SIMAX 13 (1992);
+//! Drmač & Veselić, SIMAX 29 (2008), parts I and II.
 //! Blackman & Vigna, ACM TOMS 47 (2021). Marsaglia & Bray, SIAM Review 6
 //! (1964). Stewart, "A Krylov–Schur algorithm for large eigenproblems",
 //! SIMAX 23 (2001); Wu & Simon, SIMAX 22 (2000); Lehoucq, Sorensen & Yang,
 //! *ARPACK Users' Guide* (1998); Bai & Demmel, Linear Algebra Appl. 186
-//! (1993); LAPACK `dlahqr`, `dlanv2`, `dlaexc`, `dtrevc`. **All cited from
-//! memory**; no source was reopened in tasks L3.2–L3.4 (the xoshiro256++
-//! reference outputs were read in the tests of `rand` 0.9.4; ARPACK's tie
-//! order in `dngets` is recalled, and checked only against scipy's
-//! results on the fixtures).
+//! (1993); LAPACK `dlahqr`, `dlanv2`, `dlaexc`, `dtrevc`. The chapters
+//! give volume, issue, pages and DOI. **Checked in task I03** (issue
+//! xingo-statla#4): every journal article and report against Crossref (or
+//! the publisher), the books' editions and chapter titles against the
+//! publishers' tables of contents, the HMT bounds against the journal and
+//! arXiv texts, ARPACK's convergence test and the tie order of `dngets`
+//! against the Fortran sources of arpack-ng, the defaults of `rsvd` and
+//! scipy against their sources and documentation. Corrected then: the
+//! venue of Golub & Kahan, the title of Hestenes, the two parts of Drmač &
+//! Veselić, the chapter of Muller, the section of Hammarling & Lucas
+//! (which has no rank-one section), the hypotheses of HMT's Thm. 10.6
+//! (`k ≥ 2`), the order of LINPACK's authors, the meaning of ARPACK's mode
+//! 3 and of `dgesvj`'s tolerance. **Not verified** (no legitimate copy
+//! reachable): the subsection and theorem numbers inside the books (Golub
+//! & Van Loan §5.1.3, §5.1.8, §6.5.1–6.5.3, §8.5.2, §8.6.3; Higham Thm.
+//! 10.3; Parlett §3.3 and Thm. 4.5.1; Björck §2.4), the report of
+//! Saunders itself, and the online date of Stewart (2001; the issue is
+//! dated 2002). Each chapter says which of its references were checked.
 
 #![forbid(unsafe_code)]
 

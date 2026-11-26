@@ -68,9 +68,13 @@
 //!      in Chapter 12.3 (and in the mutation check that disables D3).
 //!
 //! ## References
-//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §5.1; Daniel,
-//! Gragg, Kaufman & Stewart, Math. Comp. 30 (1976); Björck, *Numerical
-//! Methods for Least Squares Problems* (1996), §2.4 (cited from memory).
+//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §5.1
+//! "Householder and Givens transformations" (the subsections §5.1.3 and
+//! §5.1.8 cited in Algorithms H and G not verified); Daniel, Gragg,
+//! Kaufman & Stewart, Math. Comp. 30(136), 772–795 (1976); Å. Björck,
+//! *Numerical Methods for Least Squares Problems*, SIAM (1996),
+//! doi:10.1137/1.9781611971484, ch. 2 (the section §2.4 not verified).
+//! Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03.
 
 use xingo_sparse::{DenseBlock, Real};
 

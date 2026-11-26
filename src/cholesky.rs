@@ -131,10 +131,22 @@
 //! unscaled tests hold unchanged.
 //!
 //! ## References
-//! LINPACK Users' Guide (1979), ch. 10 (`dchud`, `dchdd`); Saunders (1972);
-//! Stewart, J. IMA 23 (1979); Gill, Golub, Murray & Saunders, Math. Comp.
-//! 28 (1974); Higham (2002), Theorem 10.3 (backward error of Cholesky);
-//! pilot s01 (`.claude/scratch/s01/s01-pilot`). All cited from memory.
+//! J. J. Dongarra, C. B. Moler, J. R. Bunch & G. W. Stewart, *LINPACK
+//! Users' Guide*, SIAM (1979), doi:10.1137/1.9781611971811, ch. 10
+//! "Updating QR and Cholesky decompositions" (`dchud`, `dchdd`; the routine
+//! names recalled); M. A. Saunders, "Large-scale linear programming using
+//! the Cholesky factorization", Report STAN-CS-72-252, Stanford (1972) (the
+//! number from the reference lists of the papers that cite it; the report
+//! not seen); G. W. Stewart, "The effects of rounding error on an
+//! algorithm for downdating a Cholesky factorization", J. Inst. Math.
+//! Appl. (now IMA J. Appl. Math.) 23(2), 203–213 (1979),
+//! doi:10.1093/imamat/23.2.203; P. E. Gill, G. H. Golub, W. Murray &
+//! M. A. Saunders, "Methods for modifying matrix factorizations", Math.
+//! Comp. 28(126), 505–535 (1974), doi:10.1090/S0025-5718-1974-0343558-6;
+//! Higham, *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM
+//! (2002), ch. 10 "Cholesky factorization" (the number of Theorem 10.3,
+//! backward error of Cholesky, not verified); pilot s01
+//! (`.claude/scratch/s01/s01-pilot`). Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03.
 
 use xingo_sparse::{DenseBlock, DenseError, DenseKernel, NaiveDense, Real};
 

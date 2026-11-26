@@ -125,15 +125,22 @@
 //! `ncv = 48` on `2000 × 1900`, an ignored test of 21 s in release).
 //!
 //! ## References
-//! Golub & Kahan, "Calculating the singular values and pseudo-inverse of
-//! a matrix", SIAM J. Numer. Anal. 2 (1965); Baglama & Reichel, "Augmented
-//! implicitly restarted Lanczos bidiagonalization methods", SISC 27 (2005)
-//! (the arrowhead after a thick restart; `irlba`); Wu & Simon,
-//! "Thick-restart Lanczos method for large symmetric eigenvalue problems",
-//! SIMAX 22 (2000); Simon & Zha, SISC 21 (2000); Larsen, DAIMI PB-537
-//! (1998); Daniel, Gragg, Kaufman & Stewart (1976); Parlett, *The Symmetric
-//! Eigenvalue Problem* (1998), Thm. 4.5.1 (the residual bound). Cited from
-//! memory.
+//! G. Golub & W. Kahan, "Calculating the singular values and
+//! pseudo-inverse of a matrix", J. SIAM Ser. B Numer. Anal. 2(2), 205–224
+//! (1965), doi:10.1137/0702016; J. Baglama & L. Reichel, "Augmented
+//! implicitly restarted Lanczos bidiagonalization methods", SIAM J. Sci.
+//! Comput. 27(1), 19–42 (2005), doi:10.1137/04060593X (the arrowhead after
+//! a thick restart; `irlba`); Wu & Simon, "Thick-restart Lanczos method
+//! for large symmetric eigenvalue problems", SIAM J. Matrix Anal. Appl.
+//! 22(2), 602–616 (2000); H. D. Simon & H. Zha, "Low-rank matrix
+//! approximation using the Lanczos bidiagonalization process with
+//! applications", SIAM J. Sci. Comput. 21(6), 2257–2274 (2000),
+//! doi:10.1137/S1064827597327309; R. M. Larsen, "Lanczos bidiagonalization
+//! with partial reorthogonalization", DAIMI PB-537, Aarhus (1998),
+//! doi:10.7146/dpb.v27i537.7070; Daniel, Gragg, Kaufman & Stewart, Math.
+//! Comp. 30(136), 772–795 (1976); Parlett, *The Symmetric Eigenvalue
+//! Problem*, SIAM Classics 20 (1998), Thm. 4.5.1 (the residual bound; the
+//! number not verified). Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03.
 
 use xingo_sparse::{DenseBlock, Real};
 

@@ -386,10 +386,12 @@ closed have an issue.
    factorization, is unchanged ([#3](https://github.com/StrategicProjects/xingo-statla/issues/3)).
 6. **Hardware:** s390x runs under emulation (QEMU), not on hardware, and
    no x86_64 CPU without SSE2 or with AVX-512 was tried.
-7. **The literature in the chapters is cited from memory**, including the
-   exact form of the HMT bound for `q > 0` and ARPACK's tie order in
-   `dngets`, which was checked only against scipy's answers on the
-   fixtures ([#4](https://github.com/StrategicProjects/xingo-statla/issues/4)).
+7. **The literature in the chapters was checked** against Crossref, the
+   publishers, the HMT texts and the ARPACK sources (the HMT bounds for
+   `q ≥ 0` and the tie order of `dngets` are as stated); the subsection and
+   theorem numbers *inside the books* (Golub & Van Loan, Higham, Parlett,
+   Björck) could not be checked and are marked so in the chapters
+   ([#4](https://github.com/StrategicProjects/xingo-statla/issues/4)).
 8. **The logarithm of the generator in double-double** has a measured
    bound (`2.7u`, asserted `16u`), not a proven one; in `f64` it is proven
    (`6.4u`, measured `3.5u`) ([#5](https://github.com/StrategicProjects/xingo-statla/issues/5)).
@@ -450,7 +452,7 @@ release page, and `CITATION.cff` has the citation metadata.
 [StrategicProjects](https://github.com/StrategicProjects).
 
 The algorithms are those of their authors, implemented here from the
-published descriptions: LINPACK's `dchud`/`dchdd` (Dongarra, Bunch, Moler
+published descriptions: LINPACK's `dchud`/`dchdd` (Dongarra, Moler, Bunch
 & Stewart) and Saunders (the Cholesky update and downdate); Hammarling &
 Lucas (the QR updates); Daniel, Gragg, Kaufman & Stewart (Gram–Schmidt
 with reorthogonalization); Halko, Martinsson & Tropp (the randomized SVD);

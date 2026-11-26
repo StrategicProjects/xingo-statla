@@ -44,7 +44,8 @@
 //! ## References
 //! Lehoucq, Sorensen & Yang, *ARPACK Users' Guide* (1998), reverse
 //! communication (the interface this trait replaces); faer 0.24.4
-//! `matrix_free::LinOp` (read, not copied). Cited from memory.
+//! `matrix_free::LinOp` (read, not copied). The ARPACK reference was
+//! checked against Crossref (task I03); doi:10.1137/1.9780898719628.
 
 use xingo_sparse::{CscMatrix, CsrMatrix, DenseBlock, Real};
 

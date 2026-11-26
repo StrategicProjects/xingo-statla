@@ -70,7 +70,7 @@
 //! E3. Drop the last row of `R` (zero) and the last column of `Q`; signs.
 //!     Cost `6m(n − j)`; nothing can fail after the index check.
 //!
-//! ## Algorithm R (rank-1 update `A + u vᵀ`; Hammarling & Lucas §2.5)
+//! ## Algorithm R (rank-1 update `A + u vᵀ`; GVL §6.5, in the economy form)
 //! R1. Check `|u| = m`, `|v| = n`, finite.
 //! R2. `w ← Qᵀu`, `z ← u − Qw` (Algorithm D of 12.0.4), `ρ = ‖z‖`. If `ρ ≤
 //!     τ ‖u‖`, `u` is in the range of `Q` to working precision: `ρ ← 0`, `z
@@ -134,10 +134,16 @@
 //! path), (iii-a) `5.2 κ u` against `κ(R⋆D_c⁻¹)²`.
 //!
 //! ## References
-//! Golub & Van Loan (2013), §5.2 (Householder QR), §6.5.1–6.5.3 (updating
-//! the full QR); Hammarling & Lucas, MIMS EPrint 2008.111 (economy
-//! updates); Daniel, Gragg, Kaufman & Stewart, Math. Comp. 30 (1976)
-//! (Gram–Schmidt completion with reorthogonalization). Cited from memory.
+//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §5.2 (the QR
+//! factorization), §6.5 (updating matrix factorizations, including the
+//! rank-one change; the subsections §6.5.1–6.5.3 not verified);
+//! S. Hammarling & C. Lucas, "Updating the QR factorization and the least
+//! squares problem", MIMS EPrint 2008.111 (2008) — economy updates for
+//! deleting and adding rows and columns (§2.1–2.5; it has no section on a
+//! rank-one change, which earlier editions attributed to its §2.5);
+//! Daniel, Gragg, Kaufman & Stewart, Math. Comp. 30(136), 772–795 (1976)
+//! (Gram–Schmidt completion with reorthogonalization). Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents
+//! and the EPrint's PDF, task I03.
 
 use xingo_sparse::{DenseBlock, DenseKernel, NaiveDense, Real};
 

@@ -211,16 +211,21 @@
 //!      needed for correctness: any fixed function gives a fixed stream).
 //!
 //! ## References
-//! Blackman & Vigna, "Scrambled linear pseudorandom number generators",
-//! ACM TOMS 47 (2021), and the reference `xoshiro256plusplus.c` (whose
+//! D. Blackman & S. Vigna, "Scrambled linear pseudorandom number
+//! generators", ACM Trans. Math. Softw. 47(4), 1–32 (2021),
+//! doi:10.1145/3460772, and the reference `xoshiro256plusplus.c` (whose
 //! first ten outputs from the state `(1, 2, 3, 4)`, as reproduced in the
 //! tests of `rand` 0.9.4, are pinned below); Steele, Lea & Flood,
 //! "Fast splittable pseudorandom number generators", OOPSLA 2014
-//! (SplitMix64); Marsaglia & Bray, "A convenient method for generating
-//! normal variables", SIAM Review 6 (1964); Muller, *Elementary Functions*
-//! (2016), ch. 6 (argument reduction; the atanh series); Higham, *Accuracy
-//! and Stability of Numerical Algorithms* (2002), ch. 2–3. Cited from
-//! memory, except the reference outputs.
+//! (SplitMix64; pp. 453–472, doi:10.1145/2660193.2660195); G. Marsaglia &
+//! T. A. Bray, "A convenient method for generating normal variables", SIAM
+//! Review 6(3), 260–264 (1964), doi:10.1137/1006063; J.-M. Muller,
+//! *Elementary Functions*, 3rd ed., Birkhäuser (2016),
+//! doi:10.1007/978-1-4899-7983-4, ch. 11 "Range reduction" (earlier
+//! editions of this chapter said ch. 6, which is "Table-based methods";
+//! where the book treats the atanh series is not verified); Higham,
+//! *Accuracy and Stability of Numerical Algorithms*, 2nd ed., SIAM (2002),
+//! ch. 2–3. Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03; the reference outputs as above.
 
 use xingo_sparse::Real;
 

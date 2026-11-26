@@ -167,8 +167,8 @@
 //!
 //! *Cost.* Per application one more solve and one sparse product with `M`
 //! (`2·nnz(M)` flops; the solves dominate), and the `n`-vectors `r`, `d`
-//! kept in the operator. The public operators keep `M`, `nnz(M)·(s_T + 4)
-//! + 8(n + 1)` bytes (`s_T` the size of `T`, `u32` row indices) — as much
+//! kept in the operator. The public operators keep `M`, that is
+//! `nnz(M)·(s_T + 4) + 8(n + 1)` bytes (`s_T` the size of `T`, `u32` row indices) — as much
 //! as `A` itself; the drivers keep none of it after the factorization.
 //! The factorization itself still needs `M` while it runs, so the peak of
 //! a driver is not lowered when the factorization is the peak. *Measured*
@@ -193,11 +193,21 @@
 //!      of SG6 inside a pair).
 //!
 //! ## References
-//! Lehoucq, Sorensen & Yang, *ARPACK Users' Guide* (1998), mode 3;
-//! Parlett, *The Symmetric Eigenvalue Problem* (1998), §3.3 (Sylvester's
-//! inertia and spectrum slicing); Ericsson & Ruhe, "The spectral
-//! transformation Lanczos method", Math. Comp. 35 (1980); Chapters 5.15–5.16
-//! of `xingo-sparse` (`LBLᵀ`, Bunch–Kaufman). Cited from memory.
+//! Lehoucq, Sorensen & Yang, *ARPACK Users' Guide*, SIAM (1998), mode 3
+//! (shift-invert for `K x = λ M x`, `OP = (K − σM)⁻¹M`; with `M = I`,
+//! `bmat = 'I'`, the standard problem used here); Parlett, *The Symmetric
+//! Eigenvalue Problem*, SIAM Classics 20 (1998), ch. 3 "Counting
+//! eigenvalues" (Sylvester's inertia and spectrum slicing; the section
+//! number §3.3 not verified); T. Ericsson & A. Ruhe, "The spectral
+//! transformation Lanczos method for the numerical solution of large
+//! sparse generalized symmetric eigenvalue problems", Math. Comp. 35(152),
+//! 1251–1268 (1980), doi:10.1090/S0025-5718-1980-0583502-2; R. D. Skeel,
+//! "Iterative refinement implies numerical stability for Gaussian
+//! elimination", Math. Comp. 35(151), 817–832 (1980),
+//! doi:10.1090/S0025-5718-1980-0572859-4; Higham, *Accuracy and
+//! Stability of Numerical Algorithms*, 2nd ed., SIAM (2002), ch. 12
+//! ("Iterative refinement"); Chapters 5.15–5.16 of `xingo-sparse` (`LBLᵀ`,
+//! Bunch–Kaufman). Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03.
 
 use xingo_sparse::{
     Amd, Col, CscMatrix, DenseKernel, KktError, KktForm, KktSolver, LuError, LuFactor, LuOptions,
@@ -699,7 +709,7 @@ impl<T: Real, K: DenseKernel<T>> LinearOperator<T> for NearLdl<'_, T, K> {
 
 /// The `k` eigenvalues of the symmetric `A` nearest `σ`: [`eigsh()`] with
 /// `LargestMagnitude` on [`SymShiftInvert`], mapped back by `λ = σ + 1/ν`
-/// (ARPACK mode 3 for the standard problem), nearest first. Returns also
+/// (ARPACK's mode 3 with `M = I`), nearest first. Returns also
 /// [`SymShiftInvert::count_below`]. Only the lower triangle of `a` is read.
 ///
 /// # Errors
@@ -960,7 +970,7 @@ mod tests {
     #[test]
     fn near_drivers_keep_no_copy_and_the_same_bits() {
         let x: Vec<f64> = (0..40)
-            .map(|i| ((i * 37 % 11) as f64 - 5.0) / 3.0)
+            .map(|i: i32| (f64::from(i * 37 % 11) - 5.0) / 3.0)
             .collect();
         let bits = |v: &[f64]| v.iter().map(|z| z.to_bits()).collect::<Vec<_>>();
         // General: LU.

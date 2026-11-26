@@ -58,12 +58,19 @@
 //! All three are checked by the tests below (and debug-asserted for J1).
 //!
 //! ## References
-//! Hestenes, "Inversion of matrices by biorthogonalization", J. SIAM 6
-//! (1958); Demmel & Veselić, "Jacobi's method is more accurate than QR",
-//! SIMAX 13 (1992); Golub & Van Loan, *Matrix Computations*, 4th ed.,
-//! §8.6.3; Drmač & Veselić, "New fast and accurate Jacobi SVD algorithm",
-//! SIMAX 29 (2008) (the `√p·ε` tolerance of LAPACK `dgesvj`). Cited from
-//! memory.
+//! M. R. Hestenes, "Inversion of matrices by biorthogonalization and
+//! related results", J. SIAM 6(1), 51–90 (1958), doi:10.1137/0106005;
+//! J. Demmel & K. Veselić, "Jacobi's method is more accurate than QR",
+//! SIAM J. Matrix Anal. Appl. 13(4), 1204–1245 (1992), doi:10.1137/0613074;
+//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §8.6 "Computing
+//! the SVD" (the subsection §8.6.3 not verified); Z. Drmač & K. Veselić,
+//! "New fast and accurate Jacobi SVD algorithm. I" and "… II", SIAM J.
+//! Matrix Anal. Appl. 29(4), 1322–1342 and 1343–1362 (2008),
+//! doi:10.1137/050639193 and 10.1137/05063920X. LAPACK `dgesvj` stops at
+//! `TOL = CTOL·ε` with `CTOL = √m` when singular vectors are computed
+//! and `CTOL = m` for values only, `ε = dlamch('E') = 2⁻⁵³` (half
+//! `T::EPSILON`); the `√p·ε_T` here follows the first case with this
+//! crate's `ε_T`. Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents and `dgesvj.f`, task I03.
 
 use xingo_sparse::{DenseBlock, Real};
 
@@ -81,7 +88,7 @@ pub(crate) struct JacobiOptions<T> {
 }
 
 impl<T: Real> JacobiOptions<T> {
-    /// The defaults for `p` rows: `tol = √p·ε_T` (as LAPACK `dgesvj`) and
+    /// The defaults for `p` rows: `tol = √p·ε_T` (LAPACK `dgesvj` with vectors: `√m·2⁻⁵³`) and
     /// 60 sweeps (more than ten times what quadratic convergence needs at
     /// the sizes of this crate).
     pub(crate) fn for_rows(p: usize) -> Self {

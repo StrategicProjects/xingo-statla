@@ -134,12 +134,16 @@
 //! debug-asserted after FQ and SW).
 //!
 //! ## References
-//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §7.4–7.5
-//! (Hessenberg, Francis), §8.5 (Jacobi); Anderson et al., *LAPACK Users'
-//! Guide*, 3rd ed. (1999), routines `dlahqr`, `dlanv2`, `dlaexc`,
-//! `dtrexc`, `dtrevc`; Bai & Demmel, "On swapping diagonal blocks in real
-//! Schur form", Linear Algebra Appl. 186 (1993); Demmel & Veselić, SIMAX 13
-//! (1992). Cited from memory.
+//! Golub & Van Loan, *Matrix Computations*, 4th ed. (2013), §7.4 "The
+//! Hessenberg and real Schur forms", §7.5 "The practical QR algorithm",
+//! §8.5 "Jacobi methods" (the subsection §8.5.2 cited in SJ2 not
+//! verified); E. Anderson et al., *LAPACK Users' Guide*, 3rd ed., SIAM
+//! (1999), doi:10.1137/1.9780898719604, routines `dlahqr`, `dlanv2`,
+//! `dlaexc`, `dtrexc`, `dtrevc` (the routines recalled, not re-read);
+//! Z. Bai & J. W. Demmel, "On swapping diagonal blocks in real Schur
+//! form", Linear Algebra Appl. 186, 75–95 (1993),
+//! doi:10.1016/0024-3795(93)90286-W; Demmel & Veselić, SIAM J. Matrix
+//! Anal. Appl. 13(4), 1204–1245 (1992). Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, task I03.
 
 use xingo_sparse::{DenseBlock, Real};
 

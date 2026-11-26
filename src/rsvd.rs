@@ -16,7 +16,7 @@
 //! T^{n×l}` the test matrix of Algorithm G (Chapter 12.1); `orth(Y)` the
 //! `Q` factor of Algorithm Q (Chapter 12.0.4: Householder, any rank).
 //!
-//! ## Algorithm S (randomized SVD; HMT §4–5)
+//! ## Algorithm S (randomized SVD; HMT §4.1–5.1)
 //! S1. \[Sketch.\] `l ← min(k + p, m, n)`; draw `Ω` column by column from the
 //!     seed's stream (G5), in the distribution [`RsvdOptions::sketch`].
 //! S2. \[Range.\] `Y ← A Ω`; `Q ← orth(Y)` (`m × l`).
@@ -37,8 +37,12 @@
 //! After every application the output is checked for NaN/∞
 //! ([`StatlaError::NonFinite`] with `what = "operator output"`).
 //!
-//! **Expectation bound** (Gaussian `Ω`, `p ≥ 2`; HMT Thm. 10.6 and Cor.
-//! 10.10, cited from memory):
+//! **Expectation bound** (HMT Thm. 10.6 for `q = 0` and Cor. 10.10 for the
+//! power scheme `B = (AAᵀ)^q A`, `q ≥ 0` an integer, same numbering in the
+//! journal and in arXiv:0909.4061v2; checked in task I03; hypotheses of
+//! Thm. 10.5: `A` real, standard Gaussian `Ω`, target rank `k ≥ 2`,
+//! oversampling `p ≥ 2`, `k + p ≤ min(m, n)` — the acceptance test uses
+//! `k = p = 10`):
 //!
 //! ```text
 //! E‖A − QQᵀA‖ ≤ [ (1 + √(k/(p−1))) σ_{k+1}^{2q+1}
@@ -61,11 +65,17 @@
 //!      twice and by the frozen sequence of 12.1.
 //!
 //! ## References
-//! Halko, Martinsson & Tropp, "Finding structure with randomness:
-//! probabilistic algorithms for constructing approximate matrix
-//! decompositions", SIAM Review 53 (2011), §4.2–4.5, §5.1, §10 (theorem
-//! numbers cited from memory); R package `rsvd` (Erichson et al.) for the
-//! defaults `p = 10`, `q = 2` (from memory).
+//! N. Halko, P. G. Martinsson & J. A. Tropp, "Finding structure with
+//! randomness: probabilistic algorithms for constructing approximate
+//! matrix decompositions", SIAM Review 53(2), 217–288 (2011),
+//! doi:10.1137/090771806, arXiv:0909.4061: §4.1–4.5 (the proto-algorithm,
+//! the range finder, a posteriori estimation, the power scheme, Algorithms
+//! 4.3–4.4), §5.1, §10 (Thm. 10.6, p. 274; Cor. 10.10, p. 277); the R
+//! package `rsvd` 2.0.0 (`rsvd(A, k, nu, nv, p = 10, q = 2, sdist =
+//! "normal")`) and N. B. Erichson, S. Voronin, S. L. Brunton & J. N. Kutz,
+//! "Randomized matrix decompositions using R", J. Stat. Softw. 89(11)
+//! (2019), doi:10.18637/jss.v089.i11. Checked in task I03 (issue xingo-statla#4) against Crossref and the publishers' tables of contents, the arXiv and
+//! journal PDFs of HMT and the CRAN sources of `rsvd`, task I03.
 
 use xingo_sparse::{DenseBlock, Real};
 
@@ -77,7 +87,7 @@ use crate::small::{check_finite, householder_qr};
 use crate::{MatMut, MatRef, StatlaError};
 
 /// Options of [`rsvd()`] and [`range_finder`]; the defaults follow R's
-/// `rsvd` (`p = 10`, `q = 2`; cited from memory) and HMT's advice to
+/// `rsvd` (`p = 10`, `q = 2`; checked against its CRAN sources) and HMT's advice to
 /// re-orthonormalize at every half step of the power scheme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RsvdOptions {

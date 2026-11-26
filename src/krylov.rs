@@ -44,9 +44,12 @@
 //! (E2) The coefficient returned is `0` exactly when the step broke down.
 //!
 //! ## References
-//! Daniel, Gragg, Kaufman & Stewart (1976) (DGKS); Lehoucq, Sorensen &
-//! Yang, *ARPACK Users' Guide* (1998), `dsaup2`/`dnaup2` (the `nev′` rule);
-//! Wu & Simon (2000) (thick restart). Cited from memory.
+//! Daniel, Gragg, Kaufman & Stewart, Math. Comp. 30(136), 772–795 (1976)
+//! (DGKS); Lehoucq, Sorensen & Yang, *ARPACK Users' Guide*, SIAM (1998),
+//! `dsaup2`/`dnaup2` (the `nev′` rule); Wu & Simon, SIAM J. Matrix Anal.
+//! Appl. 22(2), 602–616 (2000) (thick restart). Bibliographic data checked
+//! against Crossref, task I03; the `nev′` rule itself is recalled, not
+//! re-read in `dsaup2.f`.
 
 use xingo_sparse::Real;
 
