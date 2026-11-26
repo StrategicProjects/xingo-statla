@@ -763,3 +763,318 @@ fn eigsh_near_with_the_faer_kernel_matches_arpack() {
         }
     }
 }
+
+// ------------------------------------------------- the large fixtures
+
+/// A CSC matrix from `(row, col, value)` triplets (distinct positions).
+fn from_triplets(n: usize, mut t: Vec<(usize, usize, f64)>) -> CscMatrix<f64> {
+    t.sort_by_key(|&(i, j, _)| (j, i));
+    let mut col_ptr = vec![0usize; n + 1];
+    for &(_, j, _) in &t {
+        col_ptr[j + 1] += 1;
+    }
+    for j in 0..n {
+        col_ptr[j + 1] += col_ptr[j];
+    }
+    CscMatrix {
+        n_rows: n,
+        col_ptr,
+        row_idx: t.iter().map(|&(i, _, _)| i as u32).collect(),
+        val: t.iter().map(|&(_, _, v)| v).collect(),
+    }
+}
+
+/// `convdiff(nx, ny, px, py)` of `make_fixtures.py`, entry for entry
+/// (`lap2d` is `px = py = 0`): `kron(I, tx) + kron(ty, I)`, `tx =
+/// tridiag(−1 − px, 2, −1 + px)` (subdiagonal first), grid index `ix + nx
+/// iy`. The diagonal is `2 + 2`; no other position receives two terms.
+fn grid(nx: usize, ny: usize, px: f64, py: f64) -> CscMatrix<f64> {
+    let mut t = Vec::new();
+    for iy in 0..ny {
+        for ix in 0..nx {
+            let p = ix + nx * iy;
+            t.push((p, p, 2.0 + 2.0));
+            if ix + 1 < nx {
+                t.push((p + 1, p, -1.0 - px));
+                t.push((p, p + 1, -1.0 + px));
+            }
+            if iy + 1 < ny {
+                t.push((p + nx, p, -1.0 - py));
+                t.push((p, p + nx, -1.0 + py));
+            }
+        }
+    }
+    from_triplets(nx * ny, t)
+}
+
+/// `tridiag_graded(n)` of `make_fixtures.py`: `tridiag(−1, 2 + i/50, −1)`.
+fn tridiag_graded(n: usize) -> CscMatrix<f64> {
+    let mut t = Vec::new();
+    for i in 0..n {
+        t.push((i, i, 2.0 + i as f64 / 50.0));
+        if i + 1 < n {
+            t.push((i + 1, i, -1.0));
+            t.push((i, i + 1, -1.0));
+        }
+    }
+    from_triplets(n, t)
+}
+
+/// The matrix of a large fixture, checked against its `checksum` record
+/// (`Σ a_ij (i + 1)(2j + 1)`, exactly rounded by the script; here summed
+/// in double-double).
+fn large(name: &str) -> (CscMatrix<f64>, Ref) {
+    let a = match name {
+        "lap2d_60x50" => grid(60, 50, 0.0, 0.0),
+        "tridiag_graded_4000" => tridiag_graded(4000),
+        "convdiff_60x50" => grid(60, 50, 0.1, 0.05),
+        _ => unreachable!("{name}"),
+    };
+    let r = Ref::read(name);
+    let mut s = Dd::ZERO;
+    for j in 0..a.n_cols() {
+        let (rows, vals) = a.col(Col::from_usize(j));
+        for (&i, &v) in rows.iter().zip(vals) {
+            s += Dd::from_f64(v) * Dd::from_f64((f64::from(i) + 1.0) * (2.0 * j as f64 + 1.0));
+        }
+    }
+    let want = r.values("checksum").unwrap()[0];
+    assert!(
+        (s.to_f64() - want).abs() <= 1e-15 * want.abs(),
+        "{name}: rebuilt matrix differs (checksum {} vs {want})",
+        s.to_f64()
+    );
+    (a, r)
+}
+
+/// (a), (b), (c) of `eigsh_matches_arpack` on the symmetric large fixtures
+/// (`n` = 3000 and 4000; issue xingo-statla#2), ignored for their cost.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "large fixtures (n = 3000, 4000; 3 s in release): run with --ignored"
+)]
+fn eigsh_matches_arpack_large() {
+    let u = f64::EPSILON / 2.0;
+    let tau = f64::EPSILON;
+    for name in ["lap2d_60x50", "tridiag_graded_4000"] {
+        let (a, r) = large(name);
+        let n = a.n_rows();
+        let anorm = r.values("norm2").unwrap()[0];
+        let near = r.values("dense_near").unwrap();
+        let spec: Vec<(f64, f64)> = near.iter().map(|&x| (x, 0.0)).collect();
+        let check = |vals: &[f64], y: &xingo_statla::DenseBlock<f64>, ncv: usize, what: &str| {
+            let mut w = 0.0f64;
+            for (c, &th) in vals.iter().enumerate() {
+                let res = residual(
+                    &a,
+                    &y.data[c * n..(c + 1) * n],
+                    &vec![0.0; n],
+                    Complex { re: th, im: 0.0 },
+                );
+                let ratio = (res / anorm - tau) / (ncv as f64 * u);
+                assert!(ratio <= C_K, "{name} {what} {c}: ratio {ratio}");
+                w = w.max(ratio);
+            }
+            w
+        };
+        for (tag, k, vals) in r.tagged("eigsh") {
+            let t0 = Instant::now();
+            let f = eigsh(
+                &mut a.clone(),
+                k,
+                Which::from_arpack(&tag).unwrap(),
+                &EigsOptions::default(),
+            )
+            .unwrap();
+            let ms = t0.elapsed().as_secs_f64() * 1e3;
+            let ours: Vec<Complex<f64>> =
+                f.values.iter().map(|&re| Complex { re, im: 0.0 }).collect();
+            let arp: Vec<(f64, f64)> = vals.iter().map(|&x| (x, 0.0)).collect();
+            let cmp = compare(&ours, &arp, &spec, anorm, &format!("{name} eigsh {tag}"));
+            let res = check(
+                &f.values,
+                f.vectors.as_ref().unwrap(),
+                default_ncv(n, k),
+                &tag,
+            );
+            print_row(
+                name,
+                &format!("eigsh {tag}"),
+                cmp,
+                res,
+                f.stats.restarts,
+                f.stats.applies,
+                ms,
+            );
+        }
+        let counts: Vec<(f64, usize)> = r.lines.iter().find(|l| l[0] == "count_below").unwrap()
+            [1..]
+            .iter()
+            .map(|t| {
+                let (s, c) = t.split_once(':').unwrap();
+                (s.parse().unwrap(), c.parse().unwrap())
+            })
+            .collect();
+        for (tag, k, vals) in r.tagged("eigsh_near") {
+            let sigma: f64 = tag.parse().unwrap();
+            let t0 = Instant::now();
+            let (f, below) = eigsh_near(&a, k, sigma, &EigsOptions::default()).unwrap();
+            let ms = t0.elapsed().as_secs_f64() * 1e3;
+            let want = counts.iter().find(|c| c.0 == sigma).unwrap().1;
+            assert_eq!(below, want, "{name} σ = {sigma}: count_below");
+            let ours: Vec<Complex<f64>> =
+                f.values.iter().map(|&re| Complex { re, im: 0.0 }).collect();
+            let arp: Vec<(f64, f64)> = vals.iter().map(|&x| (x, 0.0)).collect();
+            let cmp = compare(&ours, &arp, &spec, anorm, &format!("{name} near {sigma}"));
+            let res = check(
+                &f.values,
+                f.vectors.as_ref().unwrap(),
+                default_ncv(n, k),
+                "near",
+            );
+            print_row(
+                name,
+                &format!("eigsh_near σ={sigma} (below {below})"),
+                cmp,
+                res,
+                f.stats.restarts,
+                f.stats.applies,
+                ms,
+            );
+        }
+    }
+}
+
+/// (a), (b) of `eigs_matches_arpack` on the general large fixture
+/// (convection–diffusion on a 60 × 50 grid, `n = 3000`), ignored for its
+/// cost.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "large fixtures (n = 3000, 4000; 3 s in release): run with --ignored"
+)]
+fn eigs_matches_arpack_large() {
+    let u = f64::EPSILON / 2.0;
+    let tau = f64::EPSILON;
+    let name = "convdiff_60x50";
+    let (a, r) = large(name);
+    let n = a.n_rows();
+    let anorm = r.values("norm2").unwrap()[0];
+    let (dre, dim) = (
+        r.values("dense_near_re").unwrap(),
+        r.values("dense_near_im").unwrap(),
+    );
+    let spec: Vec<(f64, f64)> = dre.iter().zip(&dim).map(|(&x, &y)| (x, y)).collect();
+    let pairs = |v: &[f64]| -> Vec<(f64, f64)> { v.chunks(2).map(|c| (c[0], c[1])).collect() };
+    let check = |f: &xingo_statla::Eigen<f64>, ncv: usize, what: &str| {
+        let (yr, yi) = (
+            f.vectors_re.as_ref().unwrap(),
+            f.vectors_im.as_ref().unwrap(),
+        );
+        let mut w = 0.0f64;
+        for (c, th) in f.values.iter().enumerate() {
+            let res = residual(
+                &a,
+                &yr.data[c * n..(c + 1) * n],
+                &yi.data[c * n..(c + 1) * n],
+                *th,
+            );
+            let ratio = (res / anorm - tau) / (ncv as f64 * u);
+            assert!(ratio <= C_K, "{name} {what} {c}: ratio {ratio}");
+            w = w.max(ratio);
+        }
+        w
+    };
+    for (tag, k, vals) in r.tagged("eigs") {
+        let t0 = Instant::now();
+        let f = eigs(
+            &mut a.clone(),
+            k,
+            Which::from_arpack(&tag).unwrap(),
+            &EigsOptions::default(),
+        )
+        .unwrap();
+        let ms = t0.elapsed().as_secs_f64() * 1e3;
+        let cmp = compare(
+            &f.values,
+            &pairs(&vals),
+            &spec,
+            anorm,
+            &format!("{name} eigs {tag}"),
+        );
+        let res = check(&f, default_ncv(n, k), &tag);
+        print_row(
+            name,
+            &format!("eigs {tag}"),
+            cmp,
+            res,
+            f.stats.restarts,
+            f.stats.applies,
+            ms,
+        );
+    }
+    for (tag, k, vals) in r.tagged("eigs_near") {
+        let sigma: f64 = tag.parse().unwrap();
+        let t0 = Instant::now();
+        let f = eigs_near(&a, k, sigma, &EigsOptions::default()).unwrap();
+        let ms = t0.elapsed().as_secs_f64() * 1e3;
+        let cmp = compare(
+            &f.values,
+            &pairs(&vals),
+            &spec,
+            anorm,
+            &format!("{name} near {sigma}"),
+        );
+        let res = check(&f, default_ncv(n, k), "near");
+        print_row(
+            name,
+            &format!("eigs_near σ={sigma}"),
+            cmp,
+            res,
+            f.stats.restarts,
+            f.stats.applies,
+            ms,
+        );
+    }
+}
+
+/// (d) of `svds_matches_scipy` on the three large fixtures, the gaps from
+/// the `2K` largest dense singular values; ignored for its cost.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "large fixtures (n = 3000, 4000; 3 s in release): run with --ignored"
+)]
+fn svds_matches_scipy_large() {
+    for name in ["lap2d_60x50", "tridiag_graded_4000", "convdiff_60x50"] {
+        let (mut a, r) = large(name);
+        let top = r.values("sv_top").unwrap();
+        let s1 = top[0];
+        let rec = r.values("svds").unwrap();
+        let (k, sc) = (rec[0] as usize, rec[1..].to_vec());
+        let t0 = Instant::now();
+        let f = svds(&mut a, k, &SvdsOptions::default()).unwrap();
+        let ms = t0.elapsed().as_secs_f64() * 1e3;
+        let (mut worst, mut n_cmp) = (0.0f64, 0);
+        for (i, (&ours, &theirs)) in f.s.iter().zip(&sc).enumerate() {
+            let g = top
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i)
+                .map(|(_, &s)| (s - top[i]).abs())
+                .fold(f64::INFINITY, f64::min);
+            if theirs >= 1e-3 * s1 && g >= GAP * s1 {
+                let e = (ours - theirs).abs() / theirs;
+                assert!(e <= REL, "{name} σ_{i}: {ours} vs {theirs}");
+                worst = worst.max(e);
+                n_cmp += 1;
+            }
+            assert!((ours - top[i]).abs() <= 1e-12 * s1, "{name} σ_{i} vs dense");
+        }
+        eprintln!(
+            "| {name} | {worst:.1e} | {n_cmp}/{k} | restarts {} | {ms:.1} ms |",
+            f.stats.restarts
+        );
+    }
+}

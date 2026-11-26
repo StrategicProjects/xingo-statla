@@ -73,6 +73,13 @@
 //!      test of KS5 (for a symmetric `T_A` that is the estimate itself):
 //!      their entries of `b` become `0` — a perturbation of `A` of norm `≤
 //!      τ·max(ε^{2/3}, |θ|)` — and their vectors are never rotated again.
+//!      *Why the couplings and not the estimate:* for a nonnormal `T_A` the
+//!      Schur vector of a block after the first is not its eigenvector,
+//!      and its coupling can exceed the estimate `ρ` of KS4 by the
+//!      departure from normality. The check refuses such blocks a few
+//!      times per run on Jordan-like and convection-dominated matrices;
+//!      without it the residual ratio of criterion (b) reaches `7.4·10³`
+//!      (`tests/nonnormal.rs`, issue xingo-statla#2).
 //! KS7. \[Truncate (purge).\] Round `k′` so that no `2 × 2` block is split
 //!      (up if there is room, else down), keep `k′ ≥ n_L`. `V ← [V_L, V_A
 //!      Z_A[:, :k′−n_L], v_{m+1}]`, `H ← [S_LL, H_LA Z_A; 0, T_A]` restricted
@@ -131,7 +138,13 @@
 //! debug-asserted with `c_K` in every test run. In double-double, whose
 //! operations round to a few `u` (Chapter 11 of `xingo-extprec`), (K2)
 //! reached `7.5` and the residual `19.4`: its smoke tests use `64`
-//! (question Q-L34-7).
+//! (question Q-L34-7). *Strongly nonnormal matrices* (issue
+//! xingo-statla#2): `≤ 5.7` on Jordan-like blocks and on a
+//! convection-dominated operator, but `12.1` on the Grcar matrix of order
+//! 200 (`LM`, `k = 16`, `ncv = 40`, against `√(‖A‖₁‖A‖_∞) ≥ ‖A‖₂`): the
+//! constant was measured on near-normal fixtures and does not bound every
+//! matrix (`tests/nonnormal.rs` reports it; task I01 leaves the constant
+//! to a decision).
 //!
 //! ## Acceptance (L3.4, S9; tests/eigs.rs)
 //! On Matrix Market matrices the `k` wanted eigenvalues agree with
@@ -142,7 +155,11 @@
 //! question Q-L34-2). The double-double smoke tests cover `eigsh`, `eigs`,
 //! `eigsh_near` and `eigs_near`, and `eigsh_near`'s criteria are also
 //! checked with the dense kernel `FaerDense` (feature `faer`) inside its
-//! `LBLᵀ` (issue xingo-statla#7).
+//! `LBLᵀ` (issue xingo-statla#7). Larger matrices (issue xingo-statla#2):
+//! three formula fixtures of 3000 and 4000 rows (`make_fixtures.py
+//! --large`, references only, no `.mtx`) pass (a), (b), (c) and the `svds`
+//! criterion against ARPACK (worst value error `5.5·10⁻¹³`, worst residual
+//! ratio `2.8`; 3 s in release, ignored in debug builds).
 //!
 //! ## Divergences from the references
 //! * Restart by Krylov–Schur, not implicit QR (S7). Results are compared
