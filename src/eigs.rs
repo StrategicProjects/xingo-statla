@@ -165,7 +165,8 @@
 //! than `k` converged, marked `*`). The rows of `eigsh` and `eigsh_near`
 //! were measured again with the polish of KS3 (task I10, issue
 //! xingo-statla#11); the column "SJ alone" is the edition before it (task
-//! I02, reproduced bit for bit in task I10), and the rows of `eigs` and
+//! I02; reproduced in task I10 with the same restart counts and ratios
+//! within `0.01`), and the rows of `eigs` and
 //! `eigs_near` did not change (the polish is not in their KS3):
 //!
 //! | driver | matrix | which | `k`, `m` | `R` | ratio | `8 + √R` | `8 + 2√R` | SJ alone: `R` / ratio |
