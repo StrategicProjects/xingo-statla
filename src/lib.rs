@@ -69,14 +69,13 @@
 //! | 12.0.5 | `operator` | [`LinearOperator`], [`AdjointOperator`], [`OperatorError`], closures ([`from_fn`], [`from_fns`]) |
 //! | 12.0.6 | `jacobi` (private) | one-sided Jacobi SVD of a small matrix |
 //! | 12.0.7 | `krylov` (private) | expansion with DGKS and breakdown, restart dimension |
-//! | 12.0.8 | `dd` (private) | double-double arithmetic for the polish of the symmetric small solver |
 //! | 12.1 | `random` | Algorithm G (xoshiro256++, polar method, own `ln`), [`Sketch`] |
 //! | 12.2 | `cholesky` | [`Cholesky`], [`CholOptions`], [`DowndateInfo`] |
 //! | 12.3 | `qr` | [`Qr`], [`QrOptions`] |
 //! | 12.4 | `rsvd` | [`rsvd()`], [`range_finder`], [`RsvdOptions`], [`Svd`], [`SvdStats`] |
 //! | 12.5 | `svds` | [`svds()`], [`SvdsOptions`], [`SvdWhich`] |
 //! | 12.6 | `eigs` | [`eigsh()`], [`eigs()`], [`EigsOptions`], [`EigsStats`], [`SymEigen`], [`Eigen`], [`Complex`], [`Which`] |
-//! | 12.6.1 | `schur` (private) | symmetric Jacobi (polished in double-double for `eigsh`), Hessenberg + Francis real Schur, block swaps and reordering, eigenvectors of the quasi-triangular form |
+//! | 12.6.1 | `schur` (private) | symmetric Jacobi (compensated diagonal; a tightened threshold for `eigsh`), Hessenberg + Francis real Schur, block swaps and reordering, eigenvectors of the quasi-triangular form |
 //! | 12.6.2 | `shift_invert` | [`ShiftInvert`], [`SymShiftInvert`], [`eigsh_near`], [`eigs_near`] |
 //!
 //! ## What is reused from `xingo-sparse`, and why (D-0080 layering)
@@ -220,7 +219,6 @@
 #![forbid(unsafe_code)]
 
 mod cholesky;
-mod dd;
 mod eigs;
 mod error;
 mod jacobi;

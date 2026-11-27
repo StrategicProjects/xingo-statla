@@ -23,127 +23,159 @@
 //!
 //! ## Algorithm SJ (cyclic Jacobi for a symmetric matrix)
 //! SJ1. \[Scale.\] `μ ← max |a_ij|`; if `μ = 0` return `d = 0`, `Z = I`.
-//!      `W ← A/2^⌊log₂ μ⌋` (exact).
+//!      `W ← A/2^⌊log₂ μ⌋` (exact); `c_i ← 0` for every `i`.
 //! SJ2. \[Sweep.\] For every `p < q` in row-cyclic order: if `|w_pq| >
 //!      tol·√|w_pp|·√|w_qq|` and `|w_pq| > tol²` (the second test is an
-//!      absolute floor `ε²μ`: below it the entry is negligible against
-//!      `ε‖A‖` even when both diagonals vanish): `θ ← (w_qq − w_pp)/(2w_pq)`,
+//!      absolute floor `tol²μ`: below it the entry is negligible against
+//!      `tol‖A‖` even when both diagonals vanish): `θ ← (w_qq − w_pp)/(2w_pq)`,
 //!      `t ← sign(θ)/(|θ| + √(1 + θ²))` (with `θ⁻¹` inside the root when `|θ|
 //!      ≥ 1`), `c ← 1/√(1 + t²)`, `s ← t c`; `W ← JᵀWJ` and `Z ← ZJ` with `J`
 //!      the rotation in the plane `(p, q)` (`col_p ← c col_p − s col_q`, `col_q
-//!      ← s col_p + c col_q`, the same on the rows), then `w_pp ← w_pp −
-//!      t w_pq`, `w_qq ← w_qq + t w_pq`, `w_pq = w_qp ← 0` exactly (GVL
-//!      §8.5.2, the formulas that keep the diagonal accurate).
-//! SJ3. \[Stop.\] After a sweep without rotation, `d_i ← w_ii · 2^⌊log₂ μ⌋`;
-//!      the columns of `Z` are renormalized (the drift of `c² + s²`, as J4 of
-//!      Chapter 12.0.6). After `max_sweeps`, non-convergence (never seen).
+//!      ← s col_p + c col_q`, the same on the rows), then `h ← t w_pq` and the
+//!      diagonal updated by the formulas that keep it accurate (GVL §8.5.2),
+//!      `w_pp ← w_pp − h`, `w_qq ← w_qq + h`, each **compensated** (Kahan:
+//!      `y ← ±h − c_i`, `s ← w_ii + y`, `c_i ← (s − w_ii) − y`, `w_ii ← s`);
+//!      `w_pq = w_qp ← 0` exactly.
+//! SJ3. \[Stop.\] After a sweep without rotation, `d_i ← (w_ii − c_i) ·
+//!      2^⌊log₂ μ⌋`; the columns of `Z` are renormalized (the drift of `c² +
+//!      s²`, as J4 of Chapter 12.0.6). After `max_sweeps`, non-convergence
+//!      (never seen).
 //!
-//! The entries left are `≤ tol·√|d_p d_q|` (relative) or `≤ ε²μ`, so every
-//! eigenvalue is within `O(p·tol·‖A‖)` of one of `A` (Weyl), and the
-//! eigenvectors are orthogonal to `O(tol)`.
+//! `tol` is [`SchurOptions::jacobi_tol`]: `ε` by default, `ε·2⁻²⁰` in KS3 of
+//! `eigsh` (below). The entries left are `≤ tol·√|d_p d_q|` (relative) or
+//! `≤ tol²μ`, so every eigenvalue is within `O(p·tol·‖A‖)` of one of `A`
+//! (Weyl), and the eigenvectors are orthogonal to `O(ε)`.
 //!
-//! ## Algorithm SP (SJ polished in double-double: the small solver of `eigsh`)
-//! KS3 of `eigsh` (Chapter 12.6) calls this instead of SJ alone from
-//! restart `R₀ = 100` on (`POLISH_FROM_RESTART` there). `Dd` is the
-//! private double-double of Chapter 12.0.8 (`ε_dd = 2⁻¹⁰⁴`); "in dd" means
-//! every operation in `Dd`, the `f64` inputs converted exactly.
-//! SP0. \[Scalar.\] If `ε_T ≠ 2⁻⁵²` (`T` is not `f64`: the double-double of
-//!      `xingo-extprec` has no wider type here), return SJ's result.
-//! SP1. \[SJ.\] `(d₀, Z) ←` Algorithm SJ on `A` in `f64`; `d₀` is discarded.
-//!      If `μ = max |a_ij| = 0`, return `(d₀, Z) = (0, I)`.
-//! SP2. \[Re-orthonormalize.\] `Q ← Z` in dd; for each column `j` in order,
-//!      two passes of modified Gram–Schmidt against the columns `0..j` of
-//!      `Q`, then `q_j ← q_j/‖q_j‖` (Algorithm N in dd).
-//! SP3. \[Project.\] `σ ← 2^⌊log₂ μ⌋`; `Ã ← ((a_ij + a_ji)/2)/σ` in dd (exact:
-//!      the sum of two `f64` and the scalings by powers of two are exact
-//!      in dd, barring underflow); `W ← Qᵀ(ÃQ)` in dd (`ÃQ` skips the exact
-//!      zeros of `Ã`; each entry of `W` a dot product in index order).
-//! SP4. \[Jacobi in dd.\] `(D̃, Y) ←` Algorithm SJ on `W` in dd, with
-//!      `tol = ε_dd` (its SJ1 averages `W`, which is symmetric up to the
-//!      rounding of the dot products).
-//! SP5. \[Round once.\] `Q̃ ← Q Y` in dd; return `ẑ_ij = RN(q̃_ij)` and `d̂_j =
-//!      RN(d̃_j)·σ`: the only roundings to `f64` of the algorithm, one per
-//!      output entry.
+//! ## The small solver of KS3 in `eigsh`: what the Krylov relation sees
+//! KS3 of `eigsh` (Chapter 12.6) calls SJ on the active block `H_AA` of a
+//! restart and keeps `T_A = diag(d)`, `Z_A = Z`. The relation of 12.6
+//! receives, at every restart, the residual of that decomposition; on long
+//! runs the residuals of successive restarts add up, and how they add up —
+//! like a random walk or in a straight line — decides how (K2) grows with
+//! the number `R` of restarts (issue xingo-statla#11, tasks I09, I10, J01).
 //!
-//! *Why SP2 comes first.* `Z` from SJ is orthogonal only to `O(p u)`: its
-//! renormalization in SJ3 drops, in `f64`, the squares below an ulp of the
-//! small entries of a column that is nearly `e_i`, and leaves `‖z_c‖² − 1 ≈
-//! +0.93u` per column, always positive (task I09, 401 matrices of a run).
-//! Polishing `ZᵀAZ` without SP2 polishes a *congruence*, whose eigenvalues
-//! carry that bias of the norms; it was measured to keep the linear
-//! growth of 12.6 (I09, "without the reorthonormalization").
-//!
-//! *Why SJ alone is not enough* (issue xingo-statla#11, task I09; the
-//! measurements of Chapter 12.6, "Long runs"). The error SJ commits on the
-//! nearly diagonal arrowhead of a restart is small (`≈ 5u‖A‖_F`) but has
-//! the same direction at every restart, so the Krylov relation of `eigsh`
-//! accumulates it almost linearly in the number of restarts. Two
-//! components were measured:
-//! (C1) *The diagonal.* SJ2 updates `w_pp ← w_pp − t w_pq`; for an extreme
-//!      eigenvalue of the block every increment of every rotation has the
-//!      same sign, the increments below half an ulp are lost and the
-//!      others round with a bias, so `d_c` falls short of the exact
-//!      eigenvalue `λ_c` of the same `A`: on 401 blocks of a run on the 1-D
-//!      Laplacian the mean of `λ_c − d_c` over the 10 largest was `+0.42
-//!      u‖A‖` (`≈ 0.9u‖A‖` per column per restart in the run, the sum over
-//!      the kept columns positive in 83 % of restarts), against `−0.004`
-//!      with the diagonal kept in dd. It is 71 % of the coherent part of
-//!      the growth there (75 % on the indefinite tridiagonal, 54 % on a
-//!      clustered spectrum). Compensated (Kahan) or per-sweep accumulation
-//!      of the increments removes it in `f64`, but the growth stays about
-//!      linear (exponent 1.12 instead of 1.15).
-//! (C2) *The rest* (off the diagonal of the kept block, or out of the span):
-//!      unchanged by the sweep order, by the form of the rotations, by the
-//!      renormalization of `Z` and by (C1)'s remedies; reduced by a random
-//!      rotation before SJ, and removed only when `Z_A` and `T_A` are a
-//!      more accurate decomposition rounded once — SJ wholly in dd, or SJ
-//!      followed by SP2–SP5, which gave the same bits on the two runs
-//!      compared. **Which operation of SJ in `f64` creates (C2) was not
-//!      located.**
-//! SP removes both by construction: the Jacobi increments of SP4 are
-//! accumulated in dd, and what reaches `f64` is one rounding of each
-//! output entry.
-//!
-//! *Lemma P (what the rounding of SP5 adds).* Let `Q̃`, `D̃` be the dd results
-//! of SP5 and SP4 (scaled by `σ`), and let `β = max_ij |(Q̃ᵀQ̃ − I)_ij|` and
-//! `α_j = ‖A q̃_j − d̃_j q̃_j‖` (exact, on the stored dd values) be their
-//! residuals. Let `u′ = u/(1 − u)`. If no rounding to `f64` underflows, then
-//! for all `i, j`
+//! *The seven pieces (an identity).* Let `Z̃ = Z(I + N)^{−1/2}`, `N = ZᵀZ −
+//! I`, be the orthonormalization of `Z`, `M = Z̃ᵀ H_AA Z̃ − diag(d)`, and `q`
+//! the active columns kept by KS7. From `A V_A = V_A H_AA + v_{m+1} c₀ᵀ +
+//! E` (the relation before the restart, `c₀` the coupling row) and `H_AA Z̃
+//! = Z̃(diag(d) + M)`, the error that a restart adds to the kept columns is
+//! exactly
 //!
 //! ```text
-//! |(ẐᵀẐ − I)_ij| ≤ β + (2u′ + u′²)(1 + β),
-//! ‖A ẑ_j − d̂_j ẑ_j‖ ≤ α_j + u′(1 + u′)(‖A‖₂ + 2|d̃_j|)·√(1 + β),
-//! |d̂_j − d̃_j| ≤ u′|d̃_j|,
+//! G = V_A Z̃ [diag M]_q  +  V_A Z̃ [M off the diagonal, rows < q]_q
+//!   + V_A Z̃ [M, rows ≥ q]_q  +  V_A (H_AA Δz − Δz T_q)  +  v_{m+1}(c₀ᵀz_c − b_c)
+//!   + G_impl,                                     Δz = Z_q − Z̃_q,
 //! ```
 //!
-//! and `diag(d̂)` is exactly diagonal.
-//! *Proof.* A normalized dd value `x = h + ℓ` rounds to `h` with `|ℓ| ≤
-//! ulp(h)/2 ≤ u|h| ≤ u(|x| + |ℓ|)`, so `|RN(x) − x| ≤ u′|x|`. Hence `Ẑ = Q̃ +
-//! E` with `|E| ≤ u′|Q̃|` entrywise and `‖e_j‖ ≤ u′‖q̃_j‖`, `‖q̃_j‖² ≤ 1 + β`;
-//! the scaling by `σ` is exact. Then the entry `(ẐᵀẐ)_ij` is `q̃_iᵀq̃_j +
-//! e_iᵀq̃_j + q̃_iᵀe_j + e_iᵀe_j`, and Cauchy–Schwarz on the last three
-//! terms gives the first bound. For the second, the residual `A ẑ_j −
-//! d̂_j ẑ_j` is `(A q̃_j − d̃_j q̃_j) + A e_j − d̃_j e_j − (d̂_j − d̃_j) ẑ_j`,
-//! with `‖A e_j‖ ≤ ‖A‖₂u′‖q̃_j‖`, `‖d̃_j e_j‖ ≤ |d̃_j|u′‖q̃_j‖` and the
-//! last term `≤ u′|d̃_j|(1 + u′)‖q̃_j‖`. `T_A` is built from `d̂` alone. ∎
+//! the pieces being the diagonal, the off-diagonal entries inside the kept
+//! block (in the span of the new basis), those between kept and purged
+//! columns (out of it), the loss of orthogonality of `Z`, the rounding of
+//! the coupling (and the zeroed couplings of locking), and the rest — the
+//! products `V_A Z_A` of KS7 in floating point and the sweep of KS7′.
+//! Measured on five operators with `k = 10` (task J01; the relation in
+//! double-double; *cross* is `Σ_r 2⟨E Ẑ, G⟩`, the inner product of the
+//! inherited and the new error summed over the restarts; *fresh* is `Σ_r
+//! ‖G‖²`; a random walk has cross/fresh near 0), with SJ at `tol = ε` and
+//! no compensation (the edition before task I10), the share of each piece
+//! in the cross term:
 //!
-//! *What is measured, not proven.* `α_j` and `β` are those of SJ in dd —
-//! the status of (E1) below: `≤ c p ε_dd‖A‖` and `≤ c p ε_dd` by the tests
-//! (`polish_is_the_double_double_decomposition_rounded_once`, which also
-//! checks `d̂` and `Ẑ` against an independent SJ in the `DoubleDouble` of
-//! `xingo-extprec`); with them Lemma P makes the column residual of the
-//! output `≈ 3u‖A‖₂` and its orthogonality `≈ 2u` entrywise, one rounding.
-//! That the roundings of successive restarts then add up like a random
-//! walk — the `√R` growth of (K2) in 12.6 — is a **measurement** (five
-//! operators, `tests` of 12.6), not a theorem: they are deterministic
-//! functions of nearby matrices, and nothing here proves them
-//! uncorrelated.
+//! | piece | 1-D Laplacian 2000 | indefinite 1000 | 2-D 45² | clusters 1000 | geometric `SA` |
+//! |---|---:|---:|---:|---:|---:|
+//! | diagonal (C1) | 0.71 | 0.75 | 0.05 | 0.54 | 0.00 |
+//! | off the diagonal, kept × kept (C2) | 0.22 | 0.18 | 0.91 | 0.36 | 0.00 |
+//! | off the diagonal, kept × purged (C2) | 0.07 | 0.07 | 0.02 | 0.10 | 0.97 |
+//! | orthogonality, coupling, products | ≤ 0.004 | ≤ 0.004 | 0.02 | ≤ 0.001 | 0.03 |
+//! | cross / fresh | 58.4 | 40.3 | 21.7 | 491.6 | 59.2 |
 //!
-//! *Cost.* SP2 and SP5 are `≈ 2p³` and `p³` dd multiply–adds, SP3 `p³` plus
-//! `nnz(A)·p`, SP4 a few sweeps of a matrix whose off-diagonal entries
-//! start at `O(u)` (about `18p` dd operations per rotation, rotations
-//! counted in 12.6): a few Mflop at `p = 24`, independent of the order `n`
-//! of the operator (Chapter 12.6, "Long runs", gives the counts).
+//! (The operators are those of the table "The small solver of KS3" of
+//! Chapter 12.6.)
+//!
+//! *(C1) The diagonal.* For an extreme eigenvalue of the block every
+//! increment `∓t w_pq` of SJ2 has the same sign; uncompensated, the
+//! increments below half an ulp are lost and the others round with a
+//! bias, so `d_c` falls short of the exact eigenvalue of the same block by
+//! `≈ 0.4u‖A‖` on average, the same sign at most restarts. The
+//! compensation of SJ2 removes it (mean `λ_c − d_c` over the 10 largest
+//! values on 401 blocks of a run of the 1-D Laplacian: `+0.420u‖A‖`
+//! without, `−0.006` with; `+0.332` and `−0.133` on the arrowheads of the
+//! unit test).
+//!
+//! *(C2) The truncation of the stopping test.* SJ stops when every
+//! `|w_pq| ≤ tol·√|w_pp w_qq|` and drops what is left: `T_A = diag(d)`.
+//! What is left is fill-in made by the rotations (none of its energy sits
+//! in entries of `H_AA` that SJ never rotated), of size `≈ u‖A‖` at `tol =
+//! ε`, and a deterministic function of `H_AA`; the off-diagonal part of
+//! `M` is that leftover to 1–9 % (30 % on the 2-D Laplacian, `p ≈ 8`) and
+//! the rest is rounding. The relative test is what the *eigenvalues* need
+//! (they move by `w²/gap`, Demmel & Veselić), not what the *relation*
+//! needs: it receives the residual, of first order in `w`. Since `H_AA`
+//! barely changes from one restart to the next, the same leftover comes
+//! back with the same sign — the kept × kept piece points along the
+//! inherited error in 56–98 % of the columns, against about half once it
+//! is removed — and adds up in a straight line. This is why SJ wholly in
+//! double-double (threshold `2⁻¹⁰⁴`) and the polish of the previous edition
+//! removed (C2), while the form of the rotations, the sweep order, the
+//! renormalization of `Z` and the compensation of the diagonal did not.
+//! Correcting in double-double only the diagonal and the two off-diagonal
+//! pieces (a first-order rotation of `M`, rounded once) gives the growth
+//! of SJ in double-double; leaving out any one of the three keeps it about
+//! linear; correcting the orthogonality or the products adds nothing to
+//! the shape (task J01).
+//!
+//! *The threshold of KS3.* KS3 calls SJ with `tol = ε·2⁻²⁰`
+//! (`KS3_JACOBI_TOL_FACTOR` in Chapter 12.6), compensated as in SJ2.
+//! Every factor from `2⁻¹⁰` down to `2⁻⁴⁰⁰` gave the same accuracy on the
+//! operators of Chapter 12.6 and SJ converged at each; the cost grows by
+//! about one sweep per factor `2⁻⁵⁰` (`+10 %` rotations at `2⁻²⁰`).
+//! `2⁻²⁰` is the largest power for which Lemma T below keeps the
+//! truncation under `√R·u‖A‖` on every practical run (`2⁻¹⁰` only up to
+//! `R ≈ 450` at `p = 24`); the counts are in Chapter 12.6, "Why `2⁻²⁰`".
+//!
+//! *Lemma T (what the truncation can add over a run).* Let SJ stop on a
+//! block of order `p` with threshold `tol`, and `W_off` be the
+//! off-diagonal part of its final `W` scaled back by `2^⌊log₂ μ⌋`. Then
+//! `‖W_off‖_F ≤ tol·p·max(max_i|d_i|, tol·μ) ≤ tol·p·‖H_AA‖₂ (1 + O(ε))`,
+//! and over `R` restarts the part of `G` that is `V_A Z̃ W_off` adds at most
+//! `R·tol·p·‖A‖ (1 + O(m u))` to the Krylov relation, whatever its signs.
+//! *Proof.* Each of the `p(p − 1)` off-diagonal entries passed the test
+//! of SJ2 unrotated in the last sweep, so `|w_jc| ≤ tol·√|w_jj w_cc|` or
+//! `|w_jc| ≤ tol²μ`, and `√|w_jj w_cc| ≤ max_i |w_ii|`; the Frobenius norm of
+//! `p(p − 1)` such entries is at most `p` times the largest. `|d_i| ≤
+//! ‖H_AA‖₂(1 + O(ε))` (Weyl, with (E1)), `‖H_AA‖₂ ≤ ‖A‖(1 + O(m u))` as
+//! `H_AA` is a section of `VᵀAV` with `V` orthonormal to (K1), and `‖V_A
+//! Z̃‖₂ = 1 + O(m u)`. The triangle inequality over the restarts gives the
+//! second bound. ∎
+//!
+//! With `tol = ε` the bound is `2R p u‖A‖`: linear in `R`, and the measured
+//! (C2) is of that form. With `tol = ε·2⁻²⁰` it is below `u‖A‖√R` as long as
+//! `R ≤ (2²⁰/(2p))²` (`≈ 4.8·10⁸` at `p = 24`): the truncation can no longer
+//! make (K2) grow measurably. *What is only measured:* that the rounding
+//! errors that remain — the compensated diagonal rounded once, the
+//! residual `M − W_off` (the backward error of (E1), itself measured), the
+//! products of KS7 — carry no coherent component, so that (K2) grows like
+//! `√R` (Chapter 12.6, "The small solver of KS3"). They are deterministic
+//! functions of nearby matrices and nothing here proves them uncorrelated;
+//! on the clustered spectrum the compensated diagonal still keeps a small
+//! coherence (cross/fresh `5`, against `491` before).
+//!
+//! *Other scalars.* The algorithm is the same for every `T: Real`: the
+//! compensation and the threshold `ε_T·2⁻²⁰` (`ε_T = 2⁻¹⁰⁴` for the
+//! `DoubleDouble` of `xingo-extprec`, so `tol = 2⁻¹²⁴` and `tol² = 2⁻²⁴⁸`,
+//! far above its underflow); the unit test runs it in `DoubleDouble`. The
+//! crate has no `f32` (`Real` is implemented for `f64` and the
+//! double-double); for a user scalar the threshold scales with its `ε`,
+//! and the floor `tol²μ` must stay above its underflow threshold: for an
+//! `f32`-like format (`ε = 2⁻²³`, smallest normal `2⁻¹²⁶`) `tol² = 2⁻⁸⁶`,
+//! which it is (not run: no such scalar is implemented).
+//!
+//! *History.* The previous edition (task I10, D-0167) polished SJ in
+//! double-double and rounded once (Algorithm SP) from restart 100 on; it
+//! removed (C1) and (C2) because its threshold was `2⁻¹⁰⁴`, at `≈ 4` Mflop
+//! per restart, and with a trigger so that short runs kept the bits of SJ
+//! alone. SJ as above removes both in `f64` from the first restart for
+//! about a tenth of SJ's own cost (Chapter 12.6, "The small solver of
+//! KS3"); the double-double arithmetic of Chapter 12.0.8 that SP used was
+//! removed with it.
 //!
 //! ## Algorithm HR (Hessenberg reduction)
 //! For `k = 0, …, p − 3`: the reflector `P_k = I − τvvᵀ` of Algorithm H
@@ -229,9 +261,8 @@
 //!
 //! ## Invariants
 //! (E1) SJ: `‖A Z − Z diag(d)‖ ≤ c p u ‖A‖`, `‖ZᵀZ − I‖ ≤ c p u`.
-//! (E1′) SP: the bounds of Lemma P, with `β ≤ 0.1u` (debug-asserted: the
-//!      entries of `ẐᵀẐ − I`, computed in dd, are `≤ 2.2u`; the dd
-//!      residuals are measured by the tests); `d̂ = RN(d̃)`.
+//!      With the threshold of KS3 the same bounds hold (the unit test
+//!      `ks3_solver_is_accurate_and_unbiased`, against SJ in double-double).
 //! (E2) HR + FQ + SW: `H_in Z_out = Z_out T` to `c p u ‖H‖`, `Z` orthogonal
 //!      to `c p u`, `T` quasi-triangular with standardized `2 × 2` blocks
 //!      (exact zeros below; [`check_quasi_triangular`]).
@@ -254,9 +285,8 @@
 use xingo_sparse::{DenseBlock, Real};
 
 use crate::StatlaError;
-use crate::dd::Dd;
 use crate::real::{is_exact_zero, le_exact, lt};
-use crate::small::{apply_householder, axpy_sub, dot, givens, householder, norm2};
+use crate::small::{apply_householder, givens, householder};
 
 /// The thresholds of Algorithms SJ and FQ.
 #[derive(Clone, Copy, Debug)]
@@ -364,6 +394,16 @@ fn max_abs<T: Real>(data: &[T]) -> T {
     data.iter().fold(T::ZERO, |m, &v| m.max(v.abs()))
 }
 
+/// One compensated step of SJ2: returns `x + inc` and updates the lost part
+/// `c` (Kahan; `c` is the negated error carried to the next step).
+#[inline]
+fn kahan_add<T: Real>(x: T, inc: T, c: &mut T) -> T {
+    let y = inc - *c;
+    let s = x + y;
+    *c = (s - x) - y;
+    s
+}
+
 /// Algorithm SJ: eigenvalues `d` (unsorted) and orthogonal `Z` with `A ≈ Z
 /// diag(d) Zᵀ`, for symmetric `a` (its upper and lower triangles are
 /// averaged).
@@ -391,7 +431,9 @@ pub(crate) fn sym_eig<T: Real>(
     let (one, two) = (T::ONE, T::from_f64(2.0));
     let tol = o.jacobi_tol;
     let floor = tol * tol;
-    // SJ2.
+    // SJ2. `comp[i]` holds the (negated) part of the increments of `w_ii`
+    // lost so far (Kahan).
+    let mut comp = vec![T::ZERO; p];
     let mut sweeps = 0;
     loop {
         if sweeps == o.max_sweeps {
@@ -431,8 +473,9 @@ pub(crate) fn sym_eig<T: Real>(
                 rot_cols(&mut w.data, p, pp, q, (0, p), c, -s);
                 rot_rows(&mut w.data, p, pp, q, (0, p), c, -s);
                 rot_cols(&mut z.data, p, pp, q, (0, p), c, -s);
-                w.data[pp + pp * p] = app - t * apq;
-                w.data[q + q * p] = aqq + t * apq;
+                let h = t * apq;
+                w.data[pp + pp * p] = kahan_add(app, -h, &mut comp[pp]);
+                w.data[q + q * p] = kahan_add(aqq, h, &mut comp[q]);
                 w.data[pp + q * p] = T::ZERO;
                 w.data[q + pp * p] = T::ZERO;
             }
@@ -443,7 +486,7 @@ pub(crate) fn sym_eig<T: Real>(
     }
     // SJ3.
     let sc = T::from_f64(scale);
-    let d: Vec<T> = (0..p).map(|i| w.data[i + i * p] * sc).collect();
+    let d: Vec<T> = (0..p).map(|i| (w.data[i + i * p] - comp[i]) * sc).collect();
     for j in 0..p {
         let col = &mut z.data[j * p..(j + 1) * p];
         let nz = crate::small::norm2(col);
@@ -452,113 +495,6 @@ pub(crate) fn sym_eig<T: Real>(
         }
     }
     Ok((d, z))
-}
-
-/// Algorithm SP: Algorithm SJ, then (for `f64`) the polish in double-double
-/// rounded once — the symmetric small solver of KS3 in `eigsh`. Same
-/// contract as [`sym_eig`].
-pub(crate) fn sym_eig_polished<T: Real>(
-    a: &DenseBlock<T>,
-    o: &SchurOptions<T>,
-) -> Result<(Vec<T>, DenseBlock<T>), StatlaError> {
-    // SP1.
-    let (d0, z) = sym_eig(a, o)?;
-    // SP0 (after SP1, which every scalar runs).
-    if T::EPSILON.to_f64().to_bits() != f64::EPSILON.to_bits() {
-        return Ok((d0, z));
-    }
-    let p = a.rows;
-    let mu = max_abs(&a.data);
-    if is_exact_zero(mu) {
-        return Ok((d0, z));
-    }
-    let col = |j: usize| j * p..(j + 1) * p;
-    // SP2.
-    let mut q: Vec<Dd> = z.data.iter().map(|x| Dd::from_f64(x.to_f64())).collect();
-    for j in 0..p {
-        let (done, rest) = q.split_at_mut(j * p);
-        let qj = &mut rest[..p];
-        for _ in 0..2 {
-            for i in 0..j {
-                let qi = &done[col(i)];
-                let s = dot(qi, qj);
-                axpy_sub(s, qi, qj);
-            }
-        }
-        let nu = norm2(qj);
-        for v in qj.iter_mut() {
-            *v = *v / nu;
-        }
-    }
-    // SP3.
-    let sigma = pow2_floor(mu.to_f64());
-    let inv = 1.0 / sigma;
-    let half = Dd::from_f64(0.5);
-    let mut at = vec![Dd::ZERO; p * p];
-    for j in 0..p {
-        for i in 0..p {
-            let (x, y) = (a.data[i + j * p].to_f64(), a.data[j + i * p].to_f64());
-            at[i + j * p] = (Dd::from_f64(x * inv) + Dd::from_f64(y * inv)) * half;
-        }
-    }
-    let mut aq = vec![Dd::ZERO; p * p];
-    for j in 0..p {
-        for t in 0..p {
-            let f = q[t + j * p];
-            for i in 0..p {
-                let h = at[i + t * p];
-                if !is_exact_zero(h) {
-                    aq[i + j * p] += h * f;
-                }
-            }
-        }
-    }
-    let mut w = DenseBlock::<Dd>::zeros(p, p);
-    for j in 0..p {
-        for i in 0..p {
-            w.data[i + j * p] = dot(&q[col(i)], &aq[col(j)]);
-        }
-    }
-    // SP4.
-    let (dt, y) = sym_eig(&w, &SchurOptions::<Dd>::new())?;
-    // SP5.
-    let mut zh = DenseBlock::<T>::zeros(p, p);
-    for j in 0..p {
-        for i in 0..p {
-            let mut acc = Dd::ZERO;
-            for t in 0..p {
-                acc += q[i + t * p] * y.data[t + j * p];
-            }
-            zh.data[i + j * p] = T::from_f64(acc.to_f64());
-        }
-    }
-    let d: Vec<T> = dt.iter().map(|v| T::from_f64(v.to_f64() * sigma)).collect();
-    debug_assert!(
-        polish_orthogonality(&zh) <= 2.2 * f64::EPSILON / 2.0,
-        "(E1′) the polished Z is orthogonal to one rounding: {:e}",
-        polish_orthogonality(&zh)
-    );
-    Ok((d, zh))
-}
-
-/// `max_ij |(ZᵀZ − I)_ij|` computed in double-double (the check of (E1′)).
-fn polish_orthogonality<T: Real>(z: &DenseBlock<T>) -> f64 {
-    let p = z.cols;
-    let mut worst = 0.0f64;
-    for j in 0..p {
-        for i in 0..=j {
-            let mut acc = Dd::ZERO;
-            for t in 0..z.rows {
-                acc += Dd::from_f64(z.data[t + i * p].to_f64())
-                    * Dd::from_f64(z.data[t + j * p].to_f64());
-            }
-            if i == j {
-                acc -= Dd::ONE;
-            }
-            worst = worst.max(acc.abs().to_f64());
-        }
-    }
-    worst
 }
 
 /// Algorithm HR in place on `h`, accumulating into `z` (`z ← z P`).
@@ -1509,21 +1445,68 @@ mod tests {
         a
     }
 
-    /// Algorithm SP against an independent reference: SJ run wholly in the
-    /// `DoubleDouble` of `xingo-extprec` on the same matrix (accurate to
-    /// `O(p ε_dd ‖A‖)`), on random, graded and arrowhead matrices. Checks
-    /// (E1′) and Lemma P on the outputs, that every value is the reference
-    /// rounded once (bit for bit) and every vector entry within one rounding
-    /// of it plus `O(ε_dd/gap)`, and the absence of the bias (C1) of SJ.
+    /// The small solver of KS3 in `eigsh` (SJ with the compensated diagonal
+    /// and the threshold `ε·KS3_JACOBI_TOL_FACTOR`) against an independent
+    /// reference, SJ run wholly in the `DoubleDouble` of `xingo-extprec`.
+    /// Checks (E1) on random, graded and restart-like arrowhead matrices, the
+    /// values against the reference, the bias (C1) of the diagonal, and the
+    /// same solver in `DoubleDouble`. (The truncation (C2) is a property of
+    /// the sequence of restarts, not of one block: the long-run test of
+    /// Chapter 12.6 covers it.)
     #[test]
-    #[allow(clippy::too_many_lines)] // the cases and the checks of Lemma P together
-    fn polish_is_the_double_double_decomposition_rounded_once() {
+    #[allow(clippy::too_many_lines)] // the cases and the three checks together
+    fn ks3_solver_is_accurate_and_unbiased() {
         use xingo_extprec::DoubleDouble as Ext;
         let u = f64::EPSILON / 2.0;
-        let up = u / (1.0 - u);
-        let edd = Ext::EPSILON.to_f64();
         let ext = |x: f64| Ext::from_f64(x);
-        let so = SchurOptions::<f64>::new();
+        let ks3 = |eps: f64| {
+            let mut o = SchurOptions::<f64>::new();
+            o.jacobi_tol = eps * crate::eigs::KS3_JACOBI_TOL_FACTOR;
+            o
+        };
+        let so = ks3(f64::EPSILON);
+        let to_ext = |a: &DenseBlock<f64>| DenseBlock {
+            rows: a.rows,
+            cols: a.cols,
+            data: a.data.iter().map(|&x| ext(x)).collect::<Vec<Ext>>(),
+        };
+        // ‖offdiag(ZᵀAZ − diag d)‖_F, the largest column residual and the
+        // largest |ZᵀZ − I|, all in dd.
+        let measure = |a: &DenseBlock<f64>, d: &[f64], z: &DenseBlock<f64>| -> (f64, f64, f64) {
+            let p = a.rows;
+            let (mut off2, mut res, mut orth) = (0.0f64, 0.0f64, 0.0f64);
+            let mut az = vec![Ext::ZERO; p * p];
+            for j in 0..p {
+                for t in 0..p {
+                    let f = ext(z.data[t + j * p]);
+                    for i in 0..p {
+                        az[i + j * p] += ext(a.data[i + t * p]) * f;
+                    }
+                }
+            }
+            for j in 0..p {
+                let mut r2 = Ext::ZERO;
+                for i in 0..p {
+                    let r = az[i + j * p] - ext(d[j]) * ext(z.data[i + j * p]);
+                    r2 += r * r;
+                }
+                res = res.max(r2.sqrt().to_f64());
+                for i in 0..p {
+                    let (mut m, mut g) = (Ext::ZERO, Ext::ZERO);
+                    for t in 0..p {
+                        m += ext(z.data[t + i * p]) * az[t + j * p];
+                        g += ext(z.data[t + i * p]) * ext(z.data[t + j * p]);
+                    }
+                    if i == j {
+                        g -= Ext::ONE;
+                    } else {
+                        off2 += (m * m).to_f64();
+                    }
+                    orth = orth.max(g.abs().to_f64());
+                }
+            }
+            (off2.sqrt(), res, orth)
+        };
         let mut cases: Vec<DenseBlock<f64>> = Vec::new();
         for (p, seed) in [(1, 11), (2, 12), (7, 13), (24, 14), (40, 15)] {
             cases.push(rand_mat::<f64>(p, seed, true));
@@ -1541,140 +1524,75 @@ mod tests {
             }
         }
         cases.push(g);
-        let mut worst = (0.0f64, 0.0f64, 0.0f64); // orthogonality/u, residual/(u‖A‖), vectors
-        let mut mismatched = 0usize;
+        // (E1) and the values against the reference.
+        let mut worst = (0.0f64, 0.0f64, 0.0f64);
         for a in &cases {
             let p = a.rows;
-            let (d, z) = sym_eig_polished(a, &so).unwrap();
-            let ae = DenseBlock {
-                rows: p,
-                cols: p,
-                data: a.data.iter().map(|&x| ext(x)).collect::<Vec<Ext>>(),
-            };
-            let (dr, zr) = sym_eig(&ae, &SchurOptions::<Ext>::new()).unwrap();
-            let norm2 = dr.iter().fold(0.0f64, |m, v| m.max(v.to_f64().abs()));
-            // Orthogonality and residuals of the output, in dd (Lemma P).
-            for j in 0..p {
-                for i in 0..p {
-                    let mut s = Ext::ZERO;
-                    for t in 0..p {
-                        s += ext(z.data[t + i * p]) * ext(z.data[t + j * p]);
-                    }
-                    if i == j {
-                        s -= Ext::ONE;
-                    }
-                    worst.0 = worst.0.max(s.abs().to_f64() / u);
-                }
-                let mut r2 = Ext::ZERO;
-                for i in 0..p {
-                    let mut r = -(ext(d[j]) * ext(z.data[i + j * p]));
-                    for t in 0..p {
-                        r += ext(a.data[i + t * p]) * ext(z.data[t + j * p]);
-                    }
-                    r2 += r * r;
-                }
-                let res = r2.sqrt().to_f64();
-                let bound = up * (1.0 + up) * (norm2 + 2.0 * d[j].abs()) * (1.0 + 0.1 * u)
-                    + 64.0 * p as f64 * edd * norm2;
-                assert!(
-                    res <= bound,
-                    "p = {p}, column {j}: residual {res:e} > {bound:e}"
-                );
-                worst.1 = worst.1.max(res / (u * norm2.max(f64::MIN_POSITIVE)));
-            }
-            // Pair the values by order (both lists sorted).
-            let mut ord: Vec<usize> = (0..p).collect();
-            ord.sort_by(|&x, &y| d[x].total_cmp(&d[y]));
-            let mut ordr: Vec<usize> = (0..p).collect();
-            ordr.sort_by(|&x, &y| dr[x].partial_cmp(&dr[y]).unwrap());
-            for (&c, &cr) in ord.iter().zip(&ordr) {
-                let lam = dr[cr];
-                // The value: one rounding of the reference.
-                let err = (ext(d[c]) - lam).abs().to_f64();
-                assert!(
-                    err <= up * lam.abs().to_f64() + 64.0 * p as f64 * edd * norm2,
-                    "p = {p}: value {} against {lam:?}",
-                    d[c]
-                );
-                if d[c].to_bits() != lam.to_f64().to_bits() {
-                    mismatched += 1;
-                }
-                // The vector, against the reference's with the sign aligned.
-                let gap = dr
-                    .iter()
-                    .enumerate()
-                    .filter(|&(i, _)| i != cr)
-                    .map(|(_, v)| (*v - lam).abs().to_f64())
-                    .fold(f64::INFINITY, f64::min);
-                let mut s = Ext::ZERO;
-                for t in 0..p {
-                    s += ext(z.data[t + c * p]) * zr.data[t + cr * p];
-                }
-                let sign = if s.to_f64() < 0.0 { -1.0 } else { 1.0 };
-                for t in 0..p {
-                    let q = zr.data[t + cr * p] * ext(sign);
-                    let e = (ext(z.data[t + c * p]) - q).abs().to_f64();
-                    let slack = 64.0 * p as f64 * edd * norm2 / gap.max(f64::MIN_POSITIVE);
-                    assert!(
-                        e <= up * q.abs().to_f64() + slack,
-                        "p = {p}, vector {c}, entry {t}: {e:e} (gap {gap:e})"
-                    );
-                    worst.2 = worst.2.max((e - up * q.abs().to_f64()).max(0.0) / slack);
-                }
-            }
+            let (d, z) = sym_eig(a, &so).unwrap();
+            let (dr, _) = sym_eig(&to_ext(a), &SchurOptions::<Ext>::new()).unwrap();
+            let na = dr.iter().fold(0.0f64, |m, v| m.max(v.to_f64().abs()));
+            let (_, res, orth) = measure(a, &d, &z);
+            let mut ds = d.clone();
+            ds.sort_by(f64::total_cmp);
+            let mut drs = dr.clone();
+            drs.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            let verr = ds
+                .iter()
+                .zip(&drs)
+                .map(|(&x, &y)| (ext(x) - y).abs().to_f64())
+                .fold(0.0f64, f64::max);
+            let pu = p as f64 * u;
+            worst.0 = worst.0.max(res / (pu * na.max(f64::MIN_POSITIVE)));
+            worst.1 = worst.1.max(orth / pu);
+            worst.2 = worst.2.max(verr / (pu * na.max(f64::MIN_POSITIVE)));
         }
         eprintln!(
-            "(E1′): max |ẐᵀẐ − I| = {:.2}u, max residual = {:.2}u‖A‖₂, vectors at {:.1e} of the slack, {mismatched} values differ from RN(reference)",
+            "(E1) with the KS3 threshold / (p u): residual {:.2}, orthogonality {:.2}, values {:.2}",
             worst.0, worst.1, worst.2
         );
-        assert!(worst.0 <= 2.2, "{}", worst.0);
-        assert_eq!(mismatched, 0);
-        // (C1): the bias of the largest values on restart-like blocks, SJ
-        // alone against SP (task I09: +0.42 u‖A‖ for SJ on the blocks of a run).
-        let (mut b_sj, mut b_sp, mut cnt) = (0.0f64, 0.0f64, 0usize);
+        assert!(worst.0 < 8.0 && worst.1 < 8.0 && worst.2 < 8.0, "{worst:?}");
+        // (C1) on restart-like arrowheads: the mean error of the 10 largest
+        // values. Without the compensation it was `+0.332 u‖A‖` on these
+        // blocks (task I10); with it, `−0.133` here and `−0.006` on the
+        // blocks of a run of the 1-D Laplacian (task I09, offline study).
+        let (mut bias, mut cnt) = (0.0f64, 0usize);
         for _ in 0..100 {
             let a = arrowhead(24, 12, &mut rng);
-            let ae = DenseBlock {
-                rows: 24,
-                cols: 24,
-                data: a.data.iter().map(|&x| ext(x)).collect::<Vec<Ext>>(),
-            };
-            let (dr, _) = sym_eig(&ae, &SchurOptions::<Ext>::new()).unwrap();
+            let (dr, _) = sym_eig(&to_ext(&a), &SchurOptions::<Ext>::new()).unwrap();
             let (d1, _) = sym_eig(&a, &so).unwrap();
-            let (d2, _) = sym_eig_polished(&a, &so).unwrap();
-            let s = |d: &[f64]| -> Vec<f64> {
-                let mut v = d.to_vec();
-                v.sort_by(|x, y| y.total_cmp(x));
-                v
-            };
+            let na = dr.iter().fold(0.0f64, |m, v| m.max(v.to_f64().abs()));
             let mut r: Vec<Ext> = dr.clone();
             r.sort_by(|x, y| y.partial_cmp(x).unwrap());
-            let (s1, s2) = (s(&d1), s(&d2));
-            let na = r[0].to_f64().abs();
+            let mut s1 = d1.clone();
+            s1.sort_by(|x, y| y.total_cmp(x));
             for c in 0..10 {
-                b_sj += (r[c] - ext(s1[c])).to_f64() / (u * na);
-                b_sp += (r[c] - ext(s2[c])).to_f64() / (u * na);
+                bias += (r[c] - ext(s1[c])).to_f64() / (u * na);
                 cnt += 1;
             }
         }
-        let (b_sj, b_sp) = (b_sj / cnt as f64, b_sp / cnt as f64);
-        eprintln!("(C1) mean λ − d over the 10 largest: SJ {b_sj:+.3} u‖A‖, SP {b_sp:+.3} u‖A‖");
-        assert!(b_sp.abs() <= 0.05, "{b_sp}");
-        // SP0: another scalar gets SJ's bits; the zero matrix (0, I).
-        let ae = DenseBlock {
-            rows: 7,
-            cols: 7,
-            data: rand_mat::<f64>(7, 13, true)
-                .data
-                .iter()
-                .map(|&x| ext(x))
-                .collect::<Vec<Ext>>(),
-        };
-        let so_e = SchurOptions::<Ext>::new();
-        let (d1, z1) = sym_eig(&ae, &so_e).unwrap();
-        let (d2, z2) = sym_eig_polished(&ae, &so_e).unwrap();
-        assert!(d1 == d2 && z1.data == z2.data);
-        let (d, z) = sym_eig_polished(&DenseBlock::<f64>::zeros(3, 3), &so).unwrap();
+        let bias = bias / cnt as f64;
+        eprintln!("(C1) mean λ − d over the 10 largest: {bias:+.4} u‖A‖");
+        assert!(bias.abs() <= 0.2, "{bias}");
+        // The same solver in double-double: converges, (E1) at its own unit.
+        let ue = Ext::EPSILON.to_f64() / 2.0;
+        let mut oe = SchurOptions::<Ext>::new();
+        oe.jacobi_tol *= Ext::from_f64(crate::eigs::KS3_JACOBI_TOL_FACTOR);
+        let ae = to_ext(&arrowhead(24, 12, &mut rng));
+        let (de, ze) = sym_eig(&ae, &oe).unwrap();
+        let mut worst_e = 0.0f64;
+        for j in 0..24 {
+            let mut r2 = Ext::ZERO;
+            for i in 0..24 {
+                let mut r = -(de[j] * ze.data[i + j * 24]);
+                for t in 0..24 {
+                    r += ae.data[i + t * 24] * ze.data[t + j * 24];
+                }
+                r2 += r * r;
+            }
+            worst_e = worst_e.max(r2.sqrt().to_f64() / (24.0 * ue * 4.0));
+        }
+        assert!(worst_e < 8.0, "{worst_e}");
+        let (d, z) = sym_eig(&DenseBlock::<f64>::zeros(3, 3), &so).unwrap();
         assert_eq!((d, z.data), (vec![0.0; 3], identity::<f64>(3).data));
     }
 
