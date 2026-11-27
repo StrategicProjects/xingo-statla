@@ -24,16 +24,22 @@
 //!      CSC invariant requires, and the analysis adds the structural
 //!      diagonal).
 //! SI3. \[Factorize.\] Analyze with the crate's own AMD and factorize by the
-//!      `LBLᵀ` path of `SupernodalLdl` (no regularization: `Regularization::
-//!      none()` on an augmented form). That path checks the inertia against
-//!      the form's (`KktForm::Augmented { n_primal, n_dual }` expects
-//!      `(n_dual, n_primal, 0)`), and the inertia of `M` is not known in
-//!      advance: the first attempt declares `(n, 0, 0)` (right whenever
-//!      `σ` is below the spectrum); on `WrongInertia { found }` with `found.zero
-//!      = 0` the analysis and the factorization are repeated with
-//!      `n_primal = found.negative` — at most two factorizations. A zero
-//!      pivot (`found.zero > 0`, or `ZeroPivot`) means `σ` is numerically an
-//!      eigenvalue: [`StatlaError::Kkt`].
+//!      `LBLᵀ` path of `SupernodalLdl` with the indefinite form
+//!      (`KktForm::Indefinite`, `Regularization::none()`; issue
+//!      xingo-sparse#8): the inertia of `M` is not known in advance, and that
+//!      form reports it without checking it — one analysis and one
+//!      factorization. A zero pivot (`ZeroPivot`) means `σ` is numerically an
+//!      eigenvalue: [`StatlaError::Kkt`]. *Before xingo-sparse#8* the only
+//!      unregularized `LBLᵀ` was the augmented form, which checks a declared
+//!      inertia: the first attempt declared `(n, 0, 0)` and, on `WrongInertia
+//!      { found }` with `found.zero = 0`, the analysis and the factorization
+//!      were repeated with `n_primal = found.negative`. The factor is the
+//!      same, bit for bit (invariant (L11) of Chapter 5.17 of xingo-sparse:
+//!      the `LBLᵀ` reads neither the form nor the pivot signs, and the
+//!      analysis does not depend on the form), and so are the errors, except
+//!      that a count with zero pivots — which the `LBLᵀ` does not produce,
+//!      its zero pivots being errors — would now be `ZeroPivot` instead of
+//!      `WrongInertia`.
 //! SI4. \[Count.\] `count_below = n₋`, the eigenvalues of `A` strictly below
 //!      `σ` (Sylvester; exact for the computed factorization, i.e. for a
 //!      matrix within the backward error of `LBLᵀ` from `M`).
@@ -563,23 +569,13 @@ impl<T: Real, K: DenseKernel<T>> LdlSolver<T, K> {
             .map_err(|e| StatlaError::Kkt(KktError::Structure(e)))?;
         let low = shifted(a, sigma, true);
         let ldl = SupernodalLdl::new(kernel, SupernodalOptions::default());
-        let pattern = low.pattern();
-        let attempt = |n_primal: usize| {
-            let form = KktForm::Augmented {
-                n_primal,
-                n_dual: n - n_primal,
-            };
-            let sym = ldl.analyze(&pattern, form, &Amd::default())?;
-            ldl.factorize(&sym, &low, Regularization::none())
-        };
         // SI3.
-        let (num, inertia) = match attempt(0) {
-            Ok(r) => r,
-            Err(KktError::WrongInertia { found, .. }) if found.zero == 0 => {
-                attempt(found.negative).map_err(StatlaError::Kkt)?
-            }
-            Err(e) => return Err(StatlaError::Kkt(e)),
-        };
+        let sym = ldl
+            .analyze(&low.pattern(), KktForm::Indefinite, &Amd::default())
+            .map_err(StatlaError::Kkt)?;
+        let (num, inertia) = ldl
+            .factorize(&sym, &low, Regularization::none())
+            .map_err(StatlaError::Kkt)?;
         debug_assert_eq!(
             inertia.positive + inertia.negative + inertia.zero,
             n,

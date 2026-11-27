@@ -102,8 +102,7 @@ pub enum StatlaError {
     /// is probably an eigenvalue.
     Lu(LuError),
     /// The LDLᵀ of `A − σI` failed ([`crate::SymShiftInvert`]); a
-    /// [`KktError::WrongInertia`] with zero pivots means `σ` is
-    /// (numerically) an eigenvalue.
+    /// [`KktError::ZeroPivot`] means `σ` is (numerically) an eigenvalue.
     Kkt(KktError),
 }
 
