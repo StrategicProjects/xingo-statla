@@ -24,8 +24,8 @@ timings, stays open).
   counted in the statistics. Lemma R of Chapter 12.6 bounds the true
   residual by the recomputed one, `‖A y − θ y‖ ≤ (1 + γ_{2n+1}) ρ̂ +
   γ_3 (‖ŵ‖ + √2 |θ|) + η_op`, with no dependence on the number of
-  restarts; `tests/long_runs.rs` asserts it on runs of 880 to 1 271
-  restarts (release builds). This is the guarantee for long runs (see
+  restarts; `tests/long_runs.rs` asserts it on runs of 983 to 1 358
+  restarts (`eigs` 983 and 1 271, `eigsh` 987 and 1 358; release builds). This is the guarantee for long runs (see
   "Changed").
 * Lemma L′ of Chapter 12.1 (issue
   [#5](https://github.com/StrategicProjects/xingo-statla/issues/5)):

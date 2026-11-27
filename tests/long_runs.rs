@@ -71,8 +71,9 @@ fn lemma_r_bounds_long_runs() {
     let u = f64::EPSILON / 2.0;
     // (d, n, driver): the indefinite tridiagonal (d = 0) and the 1-D
     // Laplacian (d = 2), `LM`, `k = 10`, `ncv = 24` (Chapter 12.6, "Long
-    // runs"; 987 and 1360 restarts in eigsh since the polish of KS3, 880
-    // and 1221 with Algorithm SJ alone).
+    // runs"). Measured with this version: 987 and 1358 restarts in eigsh
+    // (the small solver of KS3 of Chapter 12.6.1), 983 and 1271 in eigs;
+    // 880 and 1221 in eigsh with Algorithm SJ as it was in 0.1.0.
     for (d, n) in [(0.0, 1000usize), (2.0, 2000)] {
         let o = EigsOptions {
             ncv: Some(24),

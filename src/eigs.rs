@@ -126,8 +126,8 @@
 //!      and RO, and the relation error grows with the number `R` of
 //!      restarts, like `√R` on most measured runs and faster on others (a
 //!      cluster of spacing `10⁻¹⁰` that never converges: about linearly,
-//!      `33 648u` after 10 000 restarts at `j = 24`; task I02, before the
-//!      polish of KS3). No form in `R` bounds every measured run (issue
+//!      `33 648u` after 10 000 restarts at `j = 24`; task I02, with Algorithm
+//!      SJ as it was in 0.1.0). No form in `R` bounds every measured run (issue
 //!      xingo-statla#9, "Guarantee"). In `eigsh`, since the small solver of
 //!      KS3 compensates its diagonal and runs with a tighter threshold
 //!      (issue xingo-statla#11, task J01), the largest (K2) of a run is `≤
@@ -166,12 +166,14 @@
 //! double-double, the worst returned pair (`allow_partial` where fewer
 //! than `k` converged, marked `*`). The rows of `eigsh` and `eigsh_near`
 //! were measured again with the small solver of KS3 of this edition (task
-//! J01, issue xingo-statla#11); the column "SP from 100" is the previous
-//! edition (the polish in double-double from restart 100 on, task I10),
-//! and "SJ alone" the one before it (task I02); both were reproduced in
+//! J01, issue xingo-statla#11; version 0.2.0); the column "SP from 100" is
+//! an intermediate edition that was never released (the polish in
+//! double-double from restart 100 on, task I10, D-0167, removed by D-0168;
+//! "the previous edition" below), and "SJ alone" the small solver of
+//! version 0.1.0 (task I02); both were reproduced in
 //! task J01 with the same restart counts and ratios. The rows of `eigs`
 //! and `eigs_near` did not change (their KS3 is HR + FQ; every `eigs` run
-//! of the test suite has the bits of both earlier editions):
+//! of the test suite has the bits of both earlier ones):
 //!
 //! | driver | matrix | which | `k`, `m` | `R` | ratio | `8 + √R` | `8 + 2√R` | SP from 100: `R` / ratio | SJ alone: `R` / ratio |
 //! |---|---|---|---|---:|---:|---:|---:|---:|---:|
@@ -302,7 +304,7 @@
 //! restart. SJ now compensates its diagonal (removes C1) and KS3 calls it
 //! with the threshold `ε·2⁻²⁰` (removes C2: by Lemma T of 12.6.1 what the
 //! truncation can add over `R` restarts is at most `R·2⁻²⁰·ε·p·‖A‖`). The
-//! previous edition (task I10) polished SJ in double-double and rounded
+//! previous edition (task I10, never released) polished SJ in double-double and rounded
 //! once (Algorithm SP) from restart 100 on; it removed both for the same
 //! reason (its threshold was `2⁻¹⁰⁴`) at about 4 Mflop per restart. On the
 //! five operators of task I09 (`k = 10`, `LM` unless noted; ratio as in
@@ -1867,7 +1869,8 @@ mod tests {
     /// of the run (after every expansion, `paranoid`) is asserted against
     /// `c·m·u·√R`, `c = 0.5`; measured `0.080`, `0.159`, `0.135`, `0.055`
     /// and `0.029` (task J01; `0.152`, `0.188`, `0.141`, `0.314` and `0.041`
-    /// with the polish from restart 100 of the previous edition); with SJ as
+    /// with the polish from restart 100 of the unreleased edition of task
+    /// I10); with SJ as
     /// it was `c` was `2.09`, `1.43`, `0.60`, `4.32` and `0.19` (task I10), so
     /// the test fails on four of the five operators without the change.
     /// Release builds only.

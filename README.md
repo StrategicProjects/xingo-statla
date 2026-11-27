@@ -252,9 +252,9 @@ dimensions, `ncv` the Krylov dimension.
 | `rsvd`: the HMT expected error | the mean over 40 seeds below the bound | 0.19–0.63 of the bound (worst single run 0.66) |
 | `svds`: residual of every triplet | `‖(Av − σu; Aᵀu − σv)‖ ≤ (τ + 8·ncv·u)·σ₁` (`c_G = 8`) | `2.30·ncv·u·σ₁` |
 | `svds`: singular values, against a certified construction | `≤ 10⁻¹³·σ₁` where the gap is `≥ 10⁻⁸σ₁` | `3.6·10⁻¹⁵·σ₁` |
-| `eigs`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures; long runs (hundreds of restarts) exceed it, up to `102.9·ncv·u·‖A‖` after 3000 restarts (Chapter 12.6, "Long runs") |
-| `eigsh`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures; long runs exceed it, up to `13.8·ncv·u·‖A‖` after 3548 restarts since its small eigensolver compensates its diagonal and runs with a tighter threshold (`125.5` after 2983 restarts before; Chapter 12.6, "Long runs") |
-| `eigsh`/`eigs`/shift-invert: eigenvalues, against ARPACK | `≤ 10⁻¹⁰` relative where the gap is `≥ 10⁻⁶‖A‖` | `9.2·10⁻¹⁴` |
+| `eigs`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures (`2.77` on the large ones); long runs (hundreds of restarts) exceed it, up to `102.9·ncv·u·‖A‖` after 3000 restarts (Chapter 12.6, "Long runs") |
+| `eigsh`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `0.48·ncv·u·‖A‖` on the fixtures (`0.45` on the large ones; `0.88` and `2.76` with the small solver of 0.1.0); long runs exceed it, up to `13.8·ncv·u·‖A‖` after 3548 restarts since its small eigensolver compensates its diagonal and runs with a tighter threshold (`125.5` after 2983 restarts before; Chapter 12.6, "Long runs") |
+| `eigsh`/`eigs`/shift-invert: eigenvalues, against ARPACK | `≤ 10⁻¹⁰` relative where the gap is `≥ 10⁻⁶‖A‖` | `9.2·10⁻¹⁴` (`5.4·10⁻¹³` on the large fixtures) |
 | shift-invert: residual on `A` | as `eigsh`/`eigs` | `2.23·ncv·u·‖A‖` (`114` without the refinement step) |
 | shift-invert: backward error of each solve | `≤ 2u` | `0.73u` (up to `526u` without refinement) |
 | `svds` against `scipy.sparse.linalg.svds` | `≤ 10⁻¹⁰` relative on the `σᵢ ≥ 10⁻³σ₁` | `2.0·10⁻¹⁵` |

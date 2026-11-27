@@ -113,7 +113,7 @@
 //! back with the same sign — the kept × kept piece points along the
 //! inherited error in 56–98 % of the columns, against about half once it
 //! is removed — and adds up in a straight line. This is why SJ wholly in
-//! double-double (threshold `2⁻¹⁰⁴`) and the polish of the previous edition
+//! double-double (threshold `2⁻¹⁰⁴`) and the polish of the unreleased edition of task I10
 //! removed (C2), while the form of the rotations, the sweep order, the
 //! renormalization of `Z` and the compensation of the diagonal did not.
 //! Correcting in double-double only the diagonal and the two off-diagonal
@@ -168,7 +168,8 @@
 //! `f32`-like format (`ε = 2⁻²³`, smallest normal `2⁻¹²⁶`) `tol² = 2⁻⁸⁶`,
 //! which it is (not run: no such scalar is implemented).
 //!
-//! *History.* The previous edition (task I10, D-0167) polished SJ in
+//! *History.* An intermediate edition, never released (task I10, D-0167),
+//! polished SJ in
 //! double-double and rounded once (Algorithm SP) from restart 100 on; it
 //! removed (C1) and (C2) because its threshold was `2⁻¹⁰⁴`, at `≈ 4` Mflop
 //! per restart, and with a trigger so that short runs kept the bits of SJ
