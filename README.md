@@ -253,7 +253,7 @@ dimensions, `ncv` the Krylov dimension.
 | `svds`: residual of every triplet | `‖(Av − σu; Aᵀu − σv)‖ ≤ (τ + 8·ncv·u)·σ₁` (`c_G = 8`) | `2.30·ncv·u·σ₁` |
 | `svds`: singular values, against a certified construction | `≤ 10⁻¹³·σ₁` where the gap is `≥ 10⁻⁸σ₁` | `3.6·10⁻¹⁵·σ₁` |
 | `eigs`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures; long runs (hundreds of restarts) exceed it, up to `102.9·ncv·u·‖A‖` after 3000 restarts (Chapter 12.6, "Long runs") |
-| `eigsh`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures; long runs exceed it, up to `13.2·ncv·u·‖A‖` after 3548 restarts since the double-double polish of its small eigensolver (`125.5` after 2983 restarts without it; Chapter 12.6, "Long runs") |
+| `eigsh`: residual of every pair | `‖Ay − θy‖ ≤ (τ + 8·ncv·u)·‖A‖` (`c_K = 8`) on runs of few restarts | `2.44·ncv·u·‖A‖` on the fixtures; long runs exceed it, up to `13.6·ncv·u·‖A‖` after 3548 restarts since the double-double polish of its small eigensolver from restart 100 on (`125.5` after 2983 restarts without it; Chapter 12.6, "Long runs") |
 | `eigsh`/`eigs`/shift-invert: eigenvalues, against ARPACK | `≤ 10⁻¹⁰` relative where the gap is `≥ 10⁻⁶‖A‖` | `9.2·10⁻¹⁴` |
 | shift-invert: residual on `A` | as `eigsh`/`eigs` | `2.23·ncv·u·‖A‖` (`114` without the refinement step) |
 | shift-invert: backward error of each solve | `≤ 2u` | `0.73u` (up to `526u` without refinement) |

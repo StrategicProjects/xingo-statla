@@ -47,10 +47,13 @@
 //!      are not stored).
 //! KS3. \[Schur.\] Decompose the active block `H_AA = Z_A T_A Z_Aᵀ`: in
 //!      `eigsh`, `T_A` diagonal by the Jacobi method of the symmetrized
-//!      block polished in double-double and rounded once (Algorithm SP of
-//!      12.6.1: Algorithm SJ in `f64`, then `Z_A` reorthonormalized and SJ
-//!      run again on `Z_AᵀH_AAZ_A` in double-double; for a scalar other
-//!      than `f64`, SJ alone); in `eigs`, the standardized real Schur
+//!      block (Algorithm SJ of 12.6.1); from restart `R₀ =`
+//!      [`POLISH_FROM_RESTART`] `= 100` on, polished in double-double and
+//!      rounded once (Algorithm SP of 12.6.1: SJ in `f64`, then `Z_A`
+//!      reorthonormalized and SJ run again on `Z_AᵀH_AAZ_A` in
+//!      double-double; for a scalar other than `f64`, SJ alone), so that a
+//!      run of fewer than `R₀` restarts has the bits of SJ alone (the
+//!      reasons, measured, under "The polish"); in `eigs`, the standardized real Schur
 //!      form by Hessenberg reduction and Francis double-shift QR (HR +
 //!      FQ). Then `b_A ← b_Aᵀ Z_A`, `H_LA ← H_LA Z_A`.
 //! KS4. \[Ritz.\] The eigenvalues `θ` of the locked blocks and of `T_A`;
@@ -129,10 +132,11 @@
 //!      `33 648u` after 10 000 restarts at `j = 24`; task I02, before the
 //!      polish of KS3). No form in `R` bounds every measured run (issue
 //!      xingo-statla#9, "Guarantee"). In `eigsh`, since the polish of KS3
-//!      (Algorithm SP, issue xingo-statla#11), the largest (K2) of a run is
-//!      `≤ 0.164·m·u·√R·‖A‖_est` on the five operators of the table "The
-//!      polish" below, asserted with `0.5` by a release-only unit test — a
-//!      measurement, not a bound.
+//!      from restart 100 on (Algorithm SP, issue xingo-statla#11), the
+//!      largest (K2) of a run is `≤ 0.314·m·u·√R·‖A‖_est` on the five
+//!      operators of the table "The polish" below (`0.164` polishing from
+//!      the first restart), asserted with `0.5` by a release-only unit test
+//!      — a measurement, not a bound.
 //! (K3) After a restart `H̄` is zero outside `[S_LL H_LA; 0 T_A]` (top `k′`
 //!      rows) and the coupling row `k′`, whose locked entries are zero;
 //!      `T_A` is quasi-triangular (diagonal in `eigsh`) — debug-asserted.
@@ -157,54 +161,57 @@
 //! `c_K(1 + √R/8) = 8 + √R` by `eigs` on a clustered spectrum (`102.9`
 //! against `62.8`), `c_K(1 + √R/4) = 8 + 2√R` by `eigsh` on an indefinite
 //! tridiagonal (`125.5` against `117.2`, with Algorithm SJ alone in KS3;
-//! `13.2` against `127.1` since the polish, task I10). After hundreds of
+//! `13.6` against `127.1` since the polish, task I10). After hundreds of
 //! restarts a caller that needs the residual should recompute it, and
 //! Lemma R below bounds the recomputed value whatever `R`. Measured in
 //! `f64`, ratio `(‖r‖/‖A‖ − τ)/(m u)` against `√(‖A‖₁‖A‖_∞)`, residual in
 //! double-double, the worst returned pair (`allow_partial` where fewer
 //! than `k` converged, marked `*`). The rows of `eigsh` and `eigsh_near`
-//! were measured again with the polish of KS3 (task I10, issue
-//! xingo-statla#11); the column "SJ alone" is the edition before it (task
-//! I02; reproduced in task I10 with the same restart counts and ratios
-//! within `0.01`), and the rows of `eigs` and
-//! `eigs_near` did not change (the polish is not in their KS3):
+//! were measured again with the polish of KS3 from restart 100 on (this
+//! edition; task I10, issue xingo-statla#11); the column "SP always" polishes
+//! from the first restart, and "SJ alone" is the edition before the polish
+//! (task I02; reproduced in task I10 with the same restart counts and
+//! ratios within `0.01`); the rows of `eigs` and `eigs_near` did not
+//! change (the polish is not in their KS3):
 //!
-//! | driver | matrix | which | `k`, `m` | `R` | ratio | `8 + √R` | `8 + 2√R` | SJ alone: `R` / ratio |
-//! |---|---|---|---|---:|---:|---:|---:|---:|
-//! | `eigs` | Grcar(100, 3) | LM | 16, 40 | 108 | 3.78 | 18.4 | 28.8 | — |
-//! | `eigs` | Grcar(200, 3) | LM | 16, 40 | 988 | 12.10 | 39.4 | 70.9 | — |
-//! | `eigs` | Grcar(200, 3) | LI | 16, 40 | 142 | 3.81 | 19.9 | 31.8 | — |
-//! | `eigs` | Grcar(400, 3) | LR | 10, 24 | 1490 | 18.86 | 46.6 | 85.2 | — |
-//! | `eigs` | Grcar(100, 3) | LM | 10, 24 `*` | 2000 | 22.14 | 52.7 | 97.4 | — |
-//! | `eigs` | 1-D Laplacian, 2000 | LM | 10, 24 | 1271 | 13.82 | 43.7 | 79.3 | — |
-//! | `eigs` | clusters of 50, 1000 | LM | 10, 24 `*` | 3000 | **102.86** | 62.8 | 117.5 | — |
-//! | `eigsh` | 1-D Laplacian, 1000 | BE | 10, 24 | 1043 | 2.07 | 40.3 | 72.6 | 10000 `*` / 31.64 |
-//! | `eigsh` | 1-D Laplacian, 2000 | LM | 10, 24 | 1360 | 1.81 | 44.9 | 81.8 | 1221 / 48.59 |
-//! | `eigsh` | 1-D Laplacian, 3000 | LA | 10, 24 | 3035 | 3.18 | 63.1 | 118.2 | 2659 / 93.50 |
-//! | `eigsh` | 2-D Laplacian, 45² | LM | 10, 14 | 2043 | 3.82 | 53.2 | 98.4 | 1984 / 18.37 |
-//! | `eigsh` | 2-D Laplacian, 60² | SA | 10, 16 | 1387 | 2.36 | 45.2 | 82.5 | 3000 `*` / 1.42 |
-//! | `eigsh` | clusters of 50, 1000 `†` | LM | 10, 24 | 2010 | 0.29 | 52.8 | 97.7 | 6127 / 52.61 |
-//! | `eigsh` | indefinite tridiagonal, 1000 | LM | 10, 24 | 987 | 4.35 | 39.4 | 70.8 | 880 / 36.70 |
-//! | `eigsh` | indefinite tridiagonal, 2000 | BE | 10, 24 | 3548 | **13.16** | 67.6 | 127.1 | 2983 / **125.53** |
-//! | `eigsh` | graded tridiagonal, 1000 | LM | 10, 14 | 131 | 0.27 | 19.4 | 30.9 | 128 / 1.40 |
-//! | `eigsh_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.66 | 21.7 | 35.5 | 189 / 0.71 |
-//! | `eigsh_near` | 2-D Laplacian, 45², `σ = 2.0001` | — | 10, 12 | 139 | 0.41 | 19.8 | 31.6 | 141 / 0.23 |
-//! | `eigs_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.74 | 21.7 | 35.5 | — |
+//! | driver | matrix | which | `k`, `m` | `R` | ratio | `8 + √R` | `8 + 2√R` | SP always: `R` / ratio | SJ alone: `R` / ratio |
+//! |---|---|---|---|---:|---:|---:|---:|---:|---:|
+//! | `eigs` | Grcar(100, 3) | LM | 16, 40 | 108 | 3.78 | 18.4 | 28.8 | — | — |
+//! | `eigs` | Grcar(200, 3) | LM | 16, 40 | 988 | 12.10 | 39.4 | 70.9 | — | — |
+//! | `eigs` | Grcar(200, 3) | LI | 16, 40 | 142 | 3.81 | 19.9 | 31.8 | — | — |
+//! | `eigs` | Grcar(400, 3) | LR | 10, 24 | 1490 | 18.86 | 46.6 | 85.2 | — | — |
+//! | `eigs` | Grcar(100, 3) | LM | 10, 24 `*` | 2000 | 22.14 | 52.7 | 97.4 | — | — |
+//! | `eigs` | 1-D Laplacian, 2000 | LM | 10, 24 | 1271 | 13.82 | 43.7 | 79.3 | — | — |
+//! | `eigs` | clusters of 50, 1000 | LM | 10, 24 `*` | 3000 | **102.86** | 62.8 | 117.5 | — | — |
+//! | `eigsh` | 1-D Laplacian, 1000 | BE | 10, 24 | 1063 | 3.31 | 40.6 | 73.2 | 1043 / 2.07 | 10000 `*` / 31.64 |
+//! | `eigsh` | 1-D Laplacian, 2000 | LM | 10, 24 | 1358 | 3.60 | 44.9 | 81.7 | 1360 / 1.81 | 1221 / 48.59 |
+//! | `eigsh` | 1-D Laplacian, 3000 | LA | 10, 24 | 3035 | 4.58 | 63.1 | 118.2 | 3035 / 3.18 | 2659 / 93.50 |
+//! | `eigsh` | 2-D Laplacian, 45² | LM | 10, 14 | 2050 | 4.11 | 53.3 | 98.6 | 2043 / 3.82 | 1984 / 18.37 |
+//! | `eigsh` | 2-D Laplacian, 60² | SA | 10, 16 | 1473 | 2.63 | 46.4 | 84.8 | 1387 / 2.36 | 3000 `*` / 1.42 |
+//! | `eigsh` | clusters of 50, 1000 `†` | LM | 10, 24 | 5380 | 3.46 | 81.3 | 154.7 | 2010 / 0.29 | 6127 / 52.61 |
+//! | `eigsh` | indefinite tridiagonal, 1000 | LM | 10, 24 | 987 | 5.05 | 39.4 | 70.8 | 987 / 4.35 | 880 / 36.70 |
+//! | `eigsh` | indefinite tridiagonal, 2000 | BE | 10, 24 | 3548 | **13.59** | 67.6 | 127.1 | 3548 / 13.16 | 2983 / **125.53** |
+//! | `eigsh` | graded tridiagonal, 1000 | LM | 10, 14 | 131 | 1.40 | 19.4 | 30.9 | 131 / 0.27 | 128 / 1.40 |
+//! | `eigsh_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.75 | 21.7 | 35.5 | 189 / 0.66 | 189 / 0.71 |
+//! | `eigsh_near` | 2-D Laplacian, 45², `σ = 2.0001` | — | 10, 12 | 141 | 0.20 | 19.9 | 31.7 | 139 / 0.41 | 141 / 0.23 |
+//! | `eigs_near` | 1-D Laplacian, 2000, `σ = 1.0001` | — | 10, 12 | 189 | 0.74 | 21.7 | 35.5 | — | — |
 //!
 //! (The 1-D Laplacian is `tridiag(−1, 2, −1)`; the indefinite tridiagonal
 //! is that minus `2I`; the graded one has diagonal `(1 − i/n)⁴` and
 //! off-diagonal `0.1√(d_i d_{i+1})`; the clusters are 20 groups of 50
 //! eigenvalues `1 − 0.04c + 10⁻⁶j`, rotated by three reflectors. `†`: the
 //! reflectors of the earlier edition of this row (`R = 2485`, ratio
-//! `21.56`) were not recorded; both columns of the row use new ones, so
-//! the row compares the two solvers on the same matrix, not with the
+//! `21.56`) were not recorded; the three columns of the row use new ones,
+//! so the row compares the solvers on the same matrix, not with the
 //! earlier number.) The shift-invert drivers converge fast on `(A −
 //! σI)⁻¹` and stay below `1`. With the polish every `eigsh` row is below
-//! `8 + √R`, and two runs that did not converge within their limits do;
-//! the polish costs restarts on most of the others (`+3 %` to `+19 %`,
+//! `8 + √R`, and the two runs that did not converge within their limits
+//! do; polishing costs restarts on most of the others (`+3 %` to `+19 %`,
 //! the indefinite tridiagonal of order 2000 the most) and saves them where
-//! SJ alone stagnated. Being measurements, these rows restore no
-//! guarantee in `R`.
+//! SJ alone stagnated; starting it at restart 100 leaves those counts
+//! almost as they are and multiplies the ratio by up to `2` (the error
+//! accumulated before restart 100 stays). Being measurements, these rows
+//! restore no guarantee in `R`.
 //! The fixture tests, with few restarts, assert `(τ + c_K·m·u)·‖A‖`;
 //! `tests/nonnormal.rs` asserts the four Grcar runs of its test against
 //! `8 + √R` and `4 c_K` as a regression check of those runs, not as a
@@ -315,17 +322,50 @@
 //! sweeps (`≈ 0.67` Mflop) and SP adds about 390 dd rotations in 3 sweeps
 //! plus the projections (`≈ 3.9` Mflop: SP2 0.8, SP3 0.5, SP4 2.3, SP5 0.4),
 //! independent of `n`, against `≈ 5.7` Mflop for the rest of a restart at
-//! `n = 2000`. Over the test suite of this crate (every Krylov run of
-//! `cargo test --release --features faer`, 157 runs of `eigsh` and
-//! `eigsh_near`) the restarts of `eigsh` went from 6 012 to 6 271 (`+4.3
-//! %`) and its applications from 82 796 to 87 459 (`+5.6 %`), the 121
-//! runs of `eigs` unchanged bit for bit; the large acceptance runs against
-//! ARPACK need one or two restarts more, and the worst residual ratio of
-//! the `eigsh` fixtures went from `0.88` to `0.35` (large ones: `2.76` to
-//! `0.42`). The unit test
+//! `n = 2000`. Polishing from the first restart, over the test suite of
+//! this crate (every Krylov run of `cargo test --release --features
+//! faer`, 156 runs of `eigsh` and `eigsh_near`), the restarts of `eigsh`
+//! went from 6 012 to 6 271 (`+4.3 %`) and its applications from 82 796
+//! to 87 459 (`+5.6 %`), with other bits in 152 of the 156 runs; the large
+//! acceptance runs against ARPACK needed one or two restarts more, and the
+//! worst residual ratio of the `eigsh` fixtures went from `0.88` to `0.35`
+//! (large ones: `2.76` to `0.42`); measured incidentally, the small
+//! fixtures took about `2.5×` the time.
+//!
+//! *Why the polish starts at restart 100* ([`POLISH_FROM_RESTART`], task
+//! I10). Runs of few restarts — every fixture, every acceptance test — do
+//! not need it (their (K2) is within `c_K` without it), and they pay its
+//! cost in full. Polishing from restart `R₀` keeps the bits of SJ alone in
+//! every run shorter than `R₀`; from `R₀` on the error accumulated so far
+//! is carried as a constant: on the five operators above it neither grows
+//! nor goes away (`‖A V − V H̄‖_F/u` at the end of the run against its value
+//! at `R₀`: Laplacian `268 → 283` for `R₀ = 100`, `778 → 677` for `R₀ =
+//! 300`), and what the restarts after `R₀` add is the small `√R` growth of
+//! the polish. Measured over `R₀ ∈ {10, 30, 100, 300}` (ratio at the end;
+//! restarts in parentheses where they differ from "always" by more than
+//! 5 %):
+//!
+//! | operator | always | `R₀ = 10` | `30` | `100` | `300` |
+//! |---|---:|---:|---:|---:|---:|
+//! | 1-D Laplacian, 2000 | 1.81 | 1.83 | 1.91 | 3.60 | 10.69 |
+//! | indefinite tridiagonal, 1000 | 4.35 | 4.64 | 4.57 | 5.05 | 16.50 |
+//! | 2-D Laplacian, 45² (`R`: 2025 always) | 3.61 | 3.31 | 3.74 (2138) | 4.06 | 8.01 |
+//! | clusters of 50, 1000 `‡` (`R`: 7856 always) | 2.04 | 2.85 (8778) | 3.99 (8652) | 14.94 (8286) | 15.34 (9131) |
+//! | geometric, `SA` (`R`: 495 always) | 0.16 | 0.19 (605) | 0.23 | 0.30 | 0.31 (578) |
+//!
+//! `R₀ = 100` keeps 153 of the 156 `eigsh` runs of the suite bit for bit
+//! those of SJ alone (the three others run 880 to 3000 restarts; `R₀ = 10`:
+//! 132, `R₀ = 30`: 144, `R₀ = 300`: 153), so the fixtures and the
+//! acceptance against ARPACK are unchanged; suite totals 6 012 → 6 256
+//! restarts and 82 796 → 87 300 applications. The runs where SJ alone
+//! stagnated converge with every `R₀` measured. No cheap signal in the
+//! loop measures (K2): the estimates `ρ` of KS4 come from the coupling
+//! row, which is exactly what the drift of the relation does not show, so
+//! the trigger counts restarts. The unit test
 //! `long_runs_relation_grows_like_the_square_root_of_restarts` asserts
-//! the largest (K2) of these runs against `0.5·m·u·√R` (the clustered one
-//! stopped at 3000 restarts).
+//! the largest (K2) of the five runs against `0.5·m·u·√R` (measured
+//! `0.314`, the clustered one, stopped at 3000 restarts; `0.164` polishing
+//! from the first restart).
 //!
 //! *Lemma R (a posteriori residual; no dependence on `R`).* Let `(θ, y)` be
 //! a returned pair, `‖y‖ = 1`, `θ = a + ib` and `y = y_r + i y_i` (`b = 0`,
@@ -372,10 +412,10 @@
 //! `LBLᵀ` (issue xingo-statla#7). Larger matrices (issue xingo-statla#2):
 //! three formula fixtures of 3000 and 4000 rows (`make_fixtures.py
 //! --large`, references only, no `.mtx`) pass (a), (b), (c) and the `svds`
-//! criterion against ARPACK (worst value error `6.1·10⁻¹³`, `eigsh` `BE` on
-//! the 2-D Laplacian of 3000 rows — `5.5·10⁻¹³` before the polish of KS3;
-//! worst residual ratio `2.8`, an `eigs` run; 3 s in release, ignored in
-//! debug builds).
+//! criterion against ARPACK (worst value error `5.5·10⁻¹³`, worst residual
+//! ratio `2.8`; 3 s in release, ignored in debug builds; all of them
+//! restart fewer than 100 times, so the polish of KS3 does not reach
+//! them).
 //!
 //! ## Divergences from the references
 //! * Restart by Krylov–Schur, not implicit QR (S7). Results are compared
@@ -422,13 +462,18 @@ use crate::random::Rng;
 use crate::real::{is_exact_zero, le_exact, lt};
 use crate::schur::{
     Cx, SchurOptions, block_value, blocks, hypot, identity, real_schur, reorder, schur_eigvec,
-    sym_eig_polished,
+    sym_eig, sym_eig_polished,
 };
 use crate::small::{check_finite, check_len, dot, norm2, orthogonalize_against};
 
 /// The constant `c_K` of invariants (K1)–(K2) and of the residual guarantee
 /// (measured in task L3.4, with a margin).
 pub(crate) const C_K: f64 = 8.0;
+
+/// KS3 of `eigsh` polishes (Algorithm SP) from this restart on and runs
+/// Algorithm SJ alone before it, so that every run shorter than this keeps
+/// the bits of the edition without the polish (task I10, "gated" variant).
+pub(crate) const POLISH_FROM_RESTART: usize = 100;
 
 /// A pair `re + i·im` (eigenvalues of a real nonsymmetric operator). No
 /// arithmetic: a value type for results, not a complex scalar (complex
@@ -954,7 +999,11 @@ impl<T: Real> Engine<T> {
             }
         }
         let (t, z) = if self.sym {
-            let (d, z) = sym_eig_polished(&ha, so)?;
+            let (d, z) = if self.stats.restarts >= POLISH_FROM_RESTART {
+                sym_eig_polished(&ha, so)?
+            } else {
+                sym_eig(&ha, so)?
+            };
             let mut t = DenseBlock::zeros(na, na);
             for (i, &di) in d.iter().enumerate() {
                 t.data[i + i * na] = di;
@@ -1415,8 +1464,9 @@ impl<T: Real> Engine<T> {
 ///
 /// Algorithm KS of Chapter 12.6 with the symmetric small solver — the
 /// thick-restart Lanczos method (Algorithm L of the contract): full DGKS
-/// reorthogonalization, Jacobi on the projected arrowhead (polished in
-/// double-double and rounded once, Chapter 12.6.1), Krylov–Schur
+/// reorthogonalization, Jacobi on the projected arrowhead (from the 100th
+/// restart on polished in double-double and rounded once, Chapter
+/// 12.6.1), Krylov–Schur
 /// truncation with locking, ARPACK's test `ρ ≤ tol·max(ε^{2/3}, |θ|)`.
 ///
 /// **Acceptance (L3.4):** on symmetric Matrix Market matrices the `k`
@@ -1788,8 +1838,9 @@ mod tests {
     /// relation (K2) of `eigsh` grows like `√R` on the five operators of task
     /// I09, where Algorithm SJ alone made it grow about linearly. The largest
     /// (K2) of the run (after every expansion, `paranoid`) is asserted
-    /// against `c·m·u·√R`, `c = 0.5`, three times the largest measured
-    /// (`0.164`, the indefinite tridiagonal); with SJ alone `c` was `2.09`,
+    /// against `c·m·u·√R`, `c = 0.5`; measured with the polish from restart
+    /// 100 on, `0.152`, `0.188`, `0.141`, `0.314` and `0.041` (`0.164` at most
+    /// polishing from the first restart); with SJ alone `c` was `2.09`,
     /// `1.43`, `0.60`, `4.32` and `0.19` (task I10), so the test fails on four
     /// of the five operators without the polish. Release builds only.
     #[test]

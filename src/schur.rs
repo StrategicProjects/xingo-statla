@@ -43,7 +43,8 @@
 //! eigenvectors are orthogonal to `O(tol)`.
 //!
 //! ## Algorithm SP (SJ polished in double-double: the small solver of `eigsh`)
-//! KS3 of `eigsh` (Chapter 12.6) calls this, not SJ alone. `Dd` is the
+//! KS3 of `eigsh` (Chapter 12.6) calls this instead of SJ alone from
+//! restart `R₀ = 100` on (`POLISH_FROM_RESTART` there). `Dd` is the
 //! private double-double of Chapter 12.0.8 (`ε_dd = 2⁻¹⁰⁴`); "in dd" means
 //! every operation in `Dd`, the `f64` inputs converted exactly.
 //! SP0. \[Scalar.\] If `ε_T ≠ 2⁻⁵²` (`T` is not `f64`: the double-double of
