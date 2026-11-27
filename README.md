@@ -314,7 +314,7 @@ their implementations for dense, sparse and closures; `rsvd` and
 `range_finder`; `svds` (the largest values); `eigsh`, `eigs`,
 `eigsh_near`, `eigs_near`, `ShiftInvert`, `SymShiftInvert`.
 
-Not in 0.1, and additive when they come: inserting or deleting a variable
+Not in 0.2, and additive when they come: inserting or deleting a variable
 of a `Cholesky` factor; the smallest singular values in `svds`
 (`SvdWhich` is `#[non_exhaustive]` for them); a blocked (WY) Householder
 QR for large factorizations; complex shifts.
@@ -337,7 +337,15 @@ internal); `rand` or `libm` as dependencies.
 * **Two scalars.** The suite of the updatable factorizations runs in full
   in `f64` and in double-double; `rsvd`, `svds`, `eigsh`, `eigs` and
   `eigsh_near` have smoke tests in double-double (`svds` values to
-  `4·10⁻³²`).
+  `4·10⁻³²`), and so has `eigs_near` since 0.2.
+* **Larger, non-normal, graded and near-singular cases** (0.2). Fixtures
+  of order 3 000 and 4 000 against ARPACK (run with `--ignored`);
+  strongly non-normal families (Jordan-like blocks, a convection-dominated
+  operator, Grcar) on which the coupling check of `eigs` fires; graded and
+  badly scaled matrices (to `10⁴⁰`) for `Cholesky` and `Qr`, with a test
+  that reaches the guard against an underflowing diagonal; shift-invert
+  with `σ` down to 1 ulp of an eigenvalue; the `faer` kernel in the
+  acceptance tests of `Cholesky` and `eigsh_near`.
 * **Mutation testing.** Deliberate defects were planted in the algorithms
   and the suite was rerun: 7 of 8 caught for the factorizations, 9 of 11
   for the SVDs, 13 of 14 for the eigensolvers, plus three more planted by
@@ -361,48 +369,35 @@ internal); `rand` or `libm` as dependencies.
 
 ## Known limitations
 
-What is still open in 0.1, each in one sentence. The ones that can be
+What is still open in 0.2, each in one sentence. The ones that can be
 closed have an issue.
 
-1. **Shift-invert close to an eigenvalue:** the refinement step was not
-   tested with `σ` within `γ·u·‖A − σI‖` of an eigenvalue, where one step
-   may not suffice (the factorization usually fails there with a zero
-   pivot) ([#1](https://github.com/StrategicProjects/xingo-statla/issues/1)).
-2. **Size and normality:** no matrix above `400 × 400` was tested for the
-   eigensolvers (`2000 × 200` for `svds`), nor any strongly non-normal
-   matrix — the coupling check before locking a Schur block in `eigs` is
-   defense code no test exercises ([#2](https://github.com/StrategicProjects/xingo-statla/issues/2)).
-3. **Interior `which` without shift-invert** (`SM` on an indefinite
+1. **Interior `which` without shift-invert** (`SM` on an indefinite
    matrix, `SI` on a complex spectrum) may not converge, as with ARPACK;
    use `eigsh_near`/`eigs_near`.
-4. **The symmetric shift-invert may factorize twice**, because the `LBLᵀ`
-   of `xingo-sparse` needs the inertia declared in advance, until it gains
-   an indefinite form
-   ([xingo-sparse#8](https://github.com/StrategicProjects/xingo-sparse/issues/8)).
-5. **Memory of the refinement:** the public operators `ShiftInvert` and
+2. **Long runs:** the residual criterion `(τ + 8·ncv·u)·‖A‖` of `eigs`
+   and `eigsh` holds on runs of few restarts; after hundreds of restarts
+   it can be exceeded (measured up to `102.9` for `eigs` and `13.8` for
+   `eigsh`, in units of `ncv·u·‖A‖`), no closed form in the number of
+   restarts is guaranteed, and the guarantee is a posteriori: recompute
+   the residuals with `SymEigen::residuals`/`Eigen::residuals` and bound
+   the true ones by Lemma R (Chapter 12.6).
+3. **Shift-invert next to an eigenvalue:** the symmetric driver keeps one
+   refinement step to within 1 ulp of an eigenvalue (measured backward
+   error `≤ 1.3u`); the general one refuses a `σ` very close to an
+   eigenvalue (the `Lu` declares `A − σI` singular), which is the
+   documented answer.
+4. **Memory of the public shift-invert operators:** `ShiftInvert` and
    `SymShiftInvert` keep a copy of `A − σI` beside its factorization (as
-   much memory as `A`); `eigs_near` and `eigsh_near` do not, and form the
-   residual from the caller's `A` with the same bits. The peak, set by the
-   factorization, is unchanged ([#3](https://github.com/StrategicProjects/xingo-statla/issues/3)).
-6. **Hardware:** s390x runs under emulation (QEMU), not on hardware, and
+   much memory as `A`); `eigs_near` and `eigsh_near` do not.
+5. **Hardware:** s390x runs under emulation (QEMU), not on hardware, and
    no x86_64 CPU without SSE2 or with AVX-512 was tried.
-7. **The literature in the chapters was checked** against Crossref, the
-   publishers, the HMT texts and the ARPACK sources (the HMT bounds for
-   `q ≥ 0` and the tie order of `dngets` are as stated); the subsection and
-   theorem numbers *inside the books* (Golub & Van Loan, Higham, Parlett,
-   Björck) could not be checked and are marked so in the chapters
-   ([#4](https://github.com/StrategicProjects/xingo-statla/issues/4)).
-8. **The logarithm of the generator in double-double** has a measured
-   bound (`2.7u`, asserted `16u`), not a proven one; in `f64` it is proven
-   (`6.4u`, measured `3.5u`) ([#5](https://github.com/StrategicProjects/xingo-statla/issues/5)).
-9. **The updatable factorizations were tested on random matrices with
-   `n ≤ 200`** and Haar-distributed singular vectors only — not on graded
-   or badly scaled matrices — and the guard against a new Cholesky
-   diagonal underflowing to zero is defense code no test reaches ([#6](https://github.com/StrategicProjects/xingo-statla/issues/6)).
-10. **Not tested:** `eigs_near` in double-double, `svds` with both
-    dimensions near 2 000 or with more than four restarts under heavy
-    locking, and the `faer` kernel beyond one test ([#7](https://github.com/StrategicProjects/xingo-statla/issues/7)).
-11. **No timing is claimed:** nothing was timed on an idle machine ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
+6. **Book references:** the literature in the chapters was checked
+   against Crossref, the publishers, the HMT texts and the ARPACK and
+   LAPACK sources, but the subsection and theorem numbers *inside the
+   books* (Golub & Van Loan, Higham, Parlett, Björck) could not be checked
+   and are marked so in the chapters.
+7. **No timing is claimed:** nothing was timed on an idle machine ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
 
 ## Design notes
 

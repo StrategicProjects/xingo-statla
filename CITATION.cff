@@ -12,8 +12,8 @@ license:
 repository-code: "https://github.com/StrategicProjects/xingo-statla"
 url: "https://strategicprojects.github.io/xingo-statla/"
 doi: 10.5281/zenodo.24382503
-version: 0.1.0
-date-released: 2026-11-19
+version: 0.2.0
+date-released: 2026-11-27
 keywords:
   - updating matrix factorizations
   - QR update

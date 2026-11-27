@@ -11,7 +11,7 @@
 # archives for the DOI. The values must stay equal to the workspace's.
 [package]
 name = "xingo-statla"
-version = "0.1.0"
+version = "0.2.0"
 description = "Updatable and matrix-free linear algebra for statistics: QR and Cholesky with rank-1 updates and downdates, randomized and truncated SVD, and ARPACK-style eigs/eigsh by Krylov-Schur restarted Lanczos/Arnoldi over a linear-operator trait"
 edition = "2024"
 rust-version = "1.90"
@@ -51,11 +51,12 @@ faer = ["xingo-sparse/faer"]
 # monorepo the root `Cargo.toml` patches it to `crates/sparse`
 # (`[patch.crates-io]`), so the workspace builds and tests against the local
 # source; the requirement must keep matching the local version, or the
-# patch goes unused (cargo warns) and the registry's is used. Only the 0.5
+# patch goes unused (cargo warns) and the registry's is used. Only the 0.6
 # line: the public API of this crate takes and returns types of
-# `xingo-sparse` (`Real`, `DenseBlock`, `CscMatrix`, `LuOptions`), and
-# 0.5 is the version tested (in the workspace and from crates.io).
-xingo-sparse = { version = "0.5.0", default-features = false }
+# `xingo-sparse` (`Real`, `DenseBlock`, `CscMatrix`, `LuOptions`,
+# `KktError`), and `SymShiftInvert` needs `KktForm::Indefinite`, new in
+# 0.6.0.
+xingo-sparse = { version = "0.6.0", default-features = false }
 
 [dev-dependencies]
 # Without the default features `fork` and `timeout` (no test uses them):
@@ -67,8 +68,8 @@ proptest = { version = "1.6", default-features = false, features = ["std", "bit-
 # From the registry, for the same reason as `xingo-sparse` (a `path`-only
 # dev-dependency would be stripped by `cargo publish`, and the mirror has no
 # `../extprec`); the root `Cargo.toml` of the monorepo patches it to
-# `crates/extprec`. 0.1.3 is the published version the tests were run with.
-xingo-extprec = { version = "0.1.3", default-features = false, features = ["sparse"] }
+# `crates/extprec`. 0.2 is the line that accepts `xingo-sparse` 0.6.
+xingo-extprec = { version = "0.2.0", default-features = false, features = ["sparse"] }
 # The exact oracle of the logarithm's tests (Lemma L′, Chapter 12.1): the
 # `dashu-float` of `xingo-extprec`'s tests, MIT OR Apache-2.0.
 dashu-float = { version = "0.6.2", default-features = false, features = ["std"] }
