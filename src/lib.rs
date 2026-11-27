@@ -219,6 +219,7 @@
 #![forbid(unsafe_code)]
 
 mod cholesky;
+mod dd;
 mod eigs;
 mod error;
 mod jacobi;

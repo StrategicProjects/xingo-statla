@@ -47,9 +47,12 @@
 //!      are not stored).
 //! KS3. \[Schur.\] Decompose the active block `H_AA = Z_A T_A Z_Aᵀ`: in
 //!      `eigsh`, `T_A` diagonal by the Jacobi method of the symmetrized
-//!      block (Algorithm SJ of 12.6.1); in `eigs`, the standardized real
-//!      Schur form by Hessenberg reduction and Francis double-shift QR
-//!      (HR + FQ). Then `b_A ← b_Aᵀ Z_A`, `H_LA ← H_LA Z_A`.
+//!      block polished in double-double and rounded once (Algorithm SP of
+//!      12.6.1: Algorithm SJ in `f64`, then `Z_A` reorthonormalized and SJ
+//!      run again on `Z_AᵀH_AAZ_A` in double-double; for a scalar other
+//!      than `f64`, SJ alone); in `eigs`, the standardized real Schur
+//!      form by Hessenberg reduction and Francis double-shift QR (HR +
+//!      FQ). Then `b_A ← b_Aᵀ Z_A`, `H_LA ← H_LA Z_A`.
 //! KS4. \[Ritz.\] The eigenvalues `θ` of the locked blocks and of `T_A`;
 //!      for an active block the eigenvector `x` of `T_A` (Algorithm EV) gives
 //!      the estimate `ρ = |b_Aᵀ x|/‖x‖` (≥ the true one: the locked
@@ -343,7 +346,7 @@ use crate::random::Rng;
 use crate::real::{is_exact_zero, le_exact, lt};
 use crate::schur::{
     Cx, SchurOptions, block_value, blocks, hypot, identity, real_schur, reorder, schur_eigvec,
-    sym_eig,
+    sym_eig_polished,
 };
 use crate::small::{check_finite, check_len, dot, norm2, orthogonalize_against};
 
@@ -875,7 +878,7 @@ impl<T: Real> Engine<T> {
             }
         }
         let (t, z) = if self.sym {
-            let (d, z) = sym_eig(&ha, so)?;
+            let (d, z) = sym_eig_polished(&ha, so)?;
             let mut t = DenseBlock::zeros(na, na);
             for (i, &di) in d.iter().enumerate() {
                 t.data[i + i * na] = di;

@@ -42,6 +42,108 @@
 //! eigenvalue is within `O(p·tol·‖A‖)` of one of `A` (Weyl), and the
 //! eigenvectors are orthogonal to `O(tol)`.
 //!
+//! ## Algorithm SP (SJ polished in double-double: the small solver of `eigsh`)
+//! KS3 of `eigsh` (Chapter 12.6) calls this, not SJ alone. `Dd` is the
+//! private double-double of Chapter 12.0.8 (`ε_dd = 2⁻¹⁰⁴`); "in dd" means
+//! every operation in `Dd`, the `f64` inputs converted exactly.
+//! SP0. \[Scalar.\] If `ε_T ≠ 2⁻⁵²` (`T` is not `f64`: the double-double of
+//!      `xingo-extprec` has no wider type here), return SJ's result.
+//! SP1. \[SJ.\] `(d₀, Z) ←` Algorithm SJ on `A` in `f64`; `d₀` is discarded.
+//!      If `μ = max |a_ij| = 0`, return `(d₀, Z) = (0, I)`.
+//! SP2. \[Re-orthonormalize.\] `Q ← Z` in dd; for each column `j` in order,
+//!      two passes of modified Gram–Schmidt against the columns `0..j` of
+//!      `Q`, then `q_j ← q_j/‖q_j‖` (Algorithm N in dd).
+//! SP3. \[Project.\] `σ ← 2^⌊log₂ μ⌋`; `Ã ← ((a_ij + a_ji)/2)/σ` in dd (exact:
+//!      the sum of two `f64` and the scalings by powers of two are exact
+//!      in dd, barring underflow); `W ← Qᵀ(ÃQ)` in dd (`ÃQ` skips the exact
+//!      zeros of `Ã`; each entry of `W` a dot product in index order).
+//! SP4. \[Jacobi in dd.\] `(D̃, Y) ←` Algorithm SJ on `W` in dd, with
+//!      `tol = ε_dd` (its SJ1 averages `W`, which is symmetric up to the
+//!      rounding of the dot products).
+//! SP5. \[Round once.\] `Q̃ ← Q Y` in dd; return `ẑ_ij = RN(q̃_ij)` and `d̂_j =
+//!      RN(d̃_j)·σ`: the only roundings to `f64` of the algorithm, one per
+//!      output entry.
+//!
+//! *Why SP2 comes first.* `Z` from SJ is orthogonal only to `O(p u)`: its
+//! renormalization in SJ3 drops, in `f64`, the squares below an ulp of the
+//! small entries of a column that is nearly `e_i`, and leaves `‖z_c‖² − 1 ≈
+//! +0.93u` per column, always positive (task I09, 401 matrices of a run).
+//! Polishing `ZᵀAZ` without SP2 polishes a *congruence*, whose eigenvalues
+//! carry that bias of the norms; it was measured to keep the linear
+//! growth of 12.6 (I09, "without the reorthonormalization").
+//!
+//! *Why SJ alone is not enough* (issue xingo-statla#11, task I09; the
+//! measurements of Chapter 12.6, "Long runs"). The error SJ commits on the
+//! nearly diagonal arrowhead of a restart is small (`≈ 5u‖A‖_F`) but has
+//! the same direction at every restart, so the Krylov relation of `eigsh`
+//! accumulates it almost linearly in the number of restarts. Two
+//! components were measured:
+//! (C1) *The diagonal.* SJ2 updates `w_pp ← w_pp − t w_pq`; for an extreme
+//!      eigenvalue of the block every increment of every rotation has the
+//!      same sign, the increments below half an ulp are lost and the
+//!      others round with a bias, so `d_c` falls short of the exact
+//!      eigenvalue `λ_c` of the same `A`: on 401 blocks of a run on the 1-D
+//!      Laplacian the mean of `λ_c − d_c` over the 10 largest was `+0.42
+//!      u‖A‖` (`≈ 0.9u‖A‖` per column per restart in the run, the sum over
+//!      the kept columns positive in 83 % of restarts), against `−0.004`
+//!      with the diagonal kept in dd. It is 71 % of the coherent part of
+//!      the growth there (75 % on the indefinite tridiagonal, 54 % on a
+//!      clustered spectrum). Compensated (Kahan) or per-sweep accumulation
+//!      of the increments removes it in `f64`, but the growth stays about
+//!      linear (exponent 1.12 instead of 1.15).
+//! (C2) *The rest* (off the diagonal of the kept block, or out of the span):
+//!      unchanged by the sweep order, by the form of the rotations, by the
+//!      renormalization of `Z` and by (C1)'s remedies; reduced by a random
+//!      rotation before SJ, and removed only when `Z_A` and `T_A` are a
+//!      more accurate decomposition rounded once — SJ wholly in dd, or SJ
+//!      followed by SP2–SP5, which gave the same bits on the two runs
+//!      compared. **Which operation of SJ in `f64` creates (C2) was not
+//!      located.**
+//! SP removes both by construction: the Jacobi increments of SP4 are
+//! accumulated in dd, and what reaches `f64` is one rounding of each
+//! output entry.
+//!
+//! *Lemma P (what the rounding of SP5 adds).* Let `Q̃`, `D̃` be the dd results
+//! of SP5 and SP4 (scaled by `σ`), and let `β = max_ij |(Q̃ᵀQ̃ − I)_ij|` and
+//! `α_j = ‖A q̃_j − d̃_j q̃_j‖` (exact, on the stored dd values) be their
+//! residuals. Let `u′ = u/(1 − u)`. If no rounding to `f64` underflows, then
+//! for all `i, j`
+//!
+//! ```text
+//! |(ẐᵀẐ − I)_ij| ≤ β + (2u′ + u′²)(1 + β),
+//! ‖A ẑ_j − d̂_j ẑ_j‖ ≤ α_j + u′(1 + u′)(‖A‖₂ + 2|d̃_j|)·√(1 + β),
+//! |d̂_j − d̃_j| ≤ u′|d̃_j|,
+//! ```
+//!
+//! and `diag(d̂)` is exactly diagonal.
+//! *Proof.* A normalized dd value `x = h + ℓ` rounds to `h` with `|ℓ| ≤
+//! ulp(h)/2 ≤ u|h| ≤ u(|x| + |ℓ|)`, so `|RN(x) − x| ≤ u′|x|`. Hence `Ẑ = Q̃ +
+//! E` with `|E| ≤ u′|Q̃|` entrywise and `‖e_j‖ ≤ u′‖q̃_j‖`, `‖q̃_j‖² ≤ 1 + β`;
+//! the scaling by `σ` is exact. Then the entry `(ẐᵀẐ)_ij` is `q̃_iᵀq̃_j +
+//! e_iᵀq̃_j + q̃_iᵀe_j + e_iᵀe_j`, and Cauchy–Schwarz on the last three
+//! terms gives the first bound. For the second, the residual `A ẑ_j −
+//! d̂_j ẑ_j` is `(A q̃_j − d̃_j q̃_j) + A e_j − d̃_j e_j − (d̂_j − d̃_j) ẑ_j`,
+//! with `‖A e_j‖ ≤ ‖A‖₂u′‖q̃_j‖`, `‖d̃_j e_j‖ ≤ |d̃_j|u′‖q̃_j‖` and the
+//! last term `≤ u′|d̃_j|(1 + u′)‖q̃_j‖`. `T_A` is built from `d̂` alone. ∎
+//!
+//! *What is measured, not proven.* `α_j` and `β` are those of SJ in dd —
+//! the status of (E1) below: `≤ c p ε_dd‖A‖` and `≤ c p ε_dd` by the tests
+//! (`polish_is_the_double_double_decomposition_rounded_once`, which also
+//! checks `d̂` and `Ẑ` against an independent SJ in the `DoubleDouble` of
+//! `xingo-extprec`); with them Lemma P makes the column residual of the
+//! output `≈ 3u‖A‖₂` and its orthogonality `≈ 2u` entrywise, one rounding.
+//! That the roundings of successive restarts then add up like a random
+//! walk — the `√R` growth of (K2) in 12.6 — is a **measurement** (five
+//! operators, `tests` of 12.6), not a theorem: they are deterministic
+//! functions of nearby matrices, and nothing here proves them
+//! uncorrelated.
+//!
+//! *Cost.* SP2 and SP5 are `≈ 2p³` and `p³` dd multiply–adds, SP3 `p³` plus
+//! `nnz(A)·p`, SP4 a few sweeps of a matrix whose off-diagonal entries
+//! start at `O(u)` (about `18p` dd operations per rotation, rotations
+//! counted in 12.6): a few Mflop at `p = 24`, independent of the order `n`
+//! of the operator (Chapter 12.6, "Long runs", gives the counts).
+//!
 //! ## Algorithm HR (Hessenberg reduction)
 //! For `k = 0, …, p − 3`: the reflector `P_k = I − τvvᵀ` of Algorithm H
 //! (Chapter 12.0.4) on `h_{k+1:p, k}`; `H ← P_k H P_k`, `Z ← Z P_k`; the
@@ -126,6 +228,9 @@
 //!
 //! ## Invariants
 //! (E1) SJ: `‖A Z − Z diag(d)‖ ≤ c p u ‖A‖`, `‖ZᵀZ − I‖ ≤ c p u`.
+//! (E1′) SP: the bounds of Lemma P, with `β ≤ 0.1u` (debug-asserted: the
+//!      entries of `ẐᵀẐ − I`, computed in dd, are `≤ 2.2u`; the dd
+//!      residuals are measured by the tests); `d̂ = RN(d̃)`.
 //! (E2) HR + FQ + SW: `H_in Z_out = Z_out T` to `c p u ‖H‖`, `Z` orthogonal
 //!      to `c p u`, `T` quasi-triangular with standardized `2 × 2` blocks
 //!      (exact zeros below; [`check_quasi_triangular`]).
@@ -148,8 +253,9 @@
 use xingo_sparse::{DenseBlock, Real};
 
 use crate::StatlaError;
+use crate::dd::Dd;
 use crate::real::{is_exact_zero, le_exact, lt};
-use crate::small::{apply_householder, givens, householder};
+use crate::small::{apply_householder, axpy_sub, dot, givens, householder, norm2};
 
 /// The thresholds of Algorithms SJ and FQ.
 #[derive(Clone, Copy, Debug)]
@@ -345,6 +451,113 @@ pub(crate) fn sym_eig<T: Real>(
         }
     }
     Ok((d, z))
+}
+
+/// Algorithm SP: Algorithm SJ, then (for `f64`) the polish in double-double
+/// rounded once — the symmetric small solver of KS3 in `eigsh`. Same
+/// contract as [`sym_eig`].
+pub(crate) fn sym_eig_polished<T: Real>(
+    a: &DenseBlock<T>,
+    o: &SchurOptions<T>,
+) -> Result<(Vec<T>, DenseBlock<T>), StatlaError> {
+    // SP1.
+    let (d0, z) = sym_eig(a, o)?;
+    // SP0 (after SP1, which every scalar runs).
+    if T::EPSILON.to_f64().to_bits() != f64::EPSILON.to_bits() {
+        return Ok((d0, z));
+    }
+    let p = a.rows;
+    let mu = max_abs(&a.data);
+    if is_exact_zero(mu) {
+        return Ok((d0, z));
+    }
+    let col = |j: usize| j * p..(j + 1) * p;
+    // SP2.
+    let mut q: Vec<Dd> = z.data.iter().map(|x| Dd::from_f64(x.to_f64())).collect();
+    for j in 0..p {
+        let (done, rest) = q.split_at_mut(j * p);
+        let qj = &mut rest[..p];
+        for _ in 0..2 {
+            for i in 0..j {
+                let qi = &done[col(i)];
+                let s = dot(qi, qj);
+                axpy_sub(s, qi, qj);
+            }
+        }
+        let nu = norm2(qj);
+        for v in qj.iter_mut() {
+            *v = *v / nu;
+        }
+    }
+    // SP3.
+    let sigma = pow2_floor(mu.to_f64());
+    let inv = 1.0 / sigma;
+    let half = Dd::from_f64(0.5);
+    let mut at = vec![Dd::ZERO; p * p];
+    for j in 0..p {
+        for i in 0..p {
+            let (x, y) = (a.data[i + j * p].to_f64(), a.data[j + i * p].to_f64());
+            at[i + j * p] = (Dd::from_f64(x * inv) + Dd::from_f64(y * inv)) * half;
+        }
+    }
+    let mut aq = vec![Dd::ZERO; p * p];
+    for j in 0..p {
+        for t in 0..p {
+            let f = q[t + j * p];
+            for i in 0..p {
+                let h = at[i + t * p];
+                if !is_exact_zero(h) {
+                    aq[i + j * p] += h * f;
+                }
+            }
+        }
+    }
+    let mut w = DenseBlock::<Dd>::zeros(p, p);
+    for j in 0..p {
+        for i in 0..p {
+            w.data[i + j * p] = dot(&q[col(i)], &aq[col(j)]);
+        }
+    }
+    // SP4.
+    let (dt, y) = sym_eig(&w, &SchurOptions::<Dd>::new())?;
+    // SP5.
+    let mut zh = DenseBlock::<T>::zeros(p, p);
+    for j in 0..p {
+        for i in 0..p {
+            let mut acc = Dd::ZERO;
+            for t in 0..p {
+                acc += q[i + t * p] * y.data[t + j * p];
+            }
+            zh.data[i + j * p] = T::from_f64(acc.to_f64());
+        }
+    }
+    let d: Vec<T> = dt.iter().map(|v| T::from_f64(v.to_f64() * sigma)).collect();
+    debug_assert!(
+        polish_orthogonality(&zh) <= 2.2 * f64::EPSILON / 2.0,
+        "(E1′) the polished Z is orthogonal to one rounding: {:e}",
+        polish_orthogonality(&zh)
+    );
+    Ok((d, zh))
+}
+
+/// `max_ij |(ZᵀZ − I)_ij|` computed in double-double (the check of (E1′)).
+fn polish_orthogonality<T: Real>(z: &DenseBlock<T>) -> f64 {
+    let p = z.cols;
+    let mut worst = 0.0f64;
+    for j in 0..p {
+        for i in 0..=j {
+            let mut acc = Dd::ZERO;
+            for t in 0..z.rows {
+                acc += Dd::from_f64(z.data[t + i * p].to_f64())
+                    * Dd::from_f64(z.data[t + j * p].to_f64());
+            }
+            if i == j {
+                acc -= Dd::ONE;
+            }
+            worst = worst.max(acc.abs().to_f64());
+        }
+    }
+    worst
 }
 
 /// Algorithm HR in place on `h`, accumulating into `z` (`z ← z P`).
@@ -1271,6 +1484,197 @@ mod tests {
         let (d, z) = sym_eig(&DenseBlock::<f64>::zeros(3, 3), &SchurOptions::new()).unwrap();
         assert_eq!(d, vec![0.0; 3]);
         assert_eq!(z.data, identity::<f64>(3).data);
+    }
+
+    /// A nearly diagonal arrowhead of order `p`, as KS3 sees it after a
+    /// restart: `diag(θ)` on the first `k′` rows, the coupling row and column
+    /// `k′` (entries from `10⁻²` down to `10⁻¹²`), a Lanczos tridiagonal
+    /// after it.
+    fn arrowhead(p: usize, kp: usize, rng: &mut Rng) -> DenseBlock<f64> {
+        let mut a = DenseBlock::<f64>::zeros(p, p);
+        for i in 0..p {
+            a.data[i + i * p] = 4.0 * (1.0 - i as f64 / p as f64) + 1e-3 * rng.gaussian();
+        }
+        for i in 0..kp {
+            let b = rng.gaussian() * 10f64.powf(-2.0 - 10.0 * i as f64 / kp as f64);
+            a.data[i + kp * p] = b;
+            a.data[kp + i * p] = b;
+        }
+        for i in kp..p - 1 {
+            let b = 0.5 + 0.1 * rng.gaussian();
+            a.data[i + (i + 1) * p] = b;
+            a.data[i + 1 + i * p] = b;
+        }
+        a
+    }
+
+    /// Algorithm SP against an independent reference: SJ run wholly in the
+    /// `DoubleDouble` of `xingo-extprec` on the same matrix (accurate to
+    /// `O(p ε_dd ‖A‖)`), on random, graded and arrowhead matrices. Checks
+    /// (E1′) and Lemma P on the outputs, that every value is the reference
+    /// rounded once (bit for bit) and every vector entry within one rounding
+    /// of it plus `O(ε_dd/gap)`, and the absence of the bias (C1) of SJ.
+    #[test]
+    #[allow(clippy::too_many_lines)] // the cases and the checks of Lemma P together
+    fn polish_is_the_double_double_decomposition_rounded_once() {
+        use xingo_extprec::DoubleDouble as Ext;
+        let u = f64::EPSILON / 2.0;
+        let up = u / (1.0 - u);
+        let edd = Ext::EPSILON.to_f64();
+        let ext = |x: f64| Ext::from_f64(x);
+        let so = SchurOptions::<f64>::new();
+        let mut cases: Vec<DenseBlock<f64>> = Vec::new();
+        for (p, seed) in [(1, 11), (2, 12), (7, 13), (24, 14), (40, 15)] {
+            cases.push(rand_mat::<f64>(p, seed, true));
+        }
+        let mut rng = Rng::new(16);
+        for (p, kp) in [(24, 10), (24, 14), (14, 9), (40, 20)] {
+            cases.push(arrowhead(p, kp, &mut rng));
+        }
+        // Graded: D^{1/2} S D^{1/2}, D = diag(10^{-i/2}), values over 10^{p/2}.
+        let p = 12;
+        let mut g = rand_mat::<f64>(p, 17, true);
+        for j in 0..p {
+            for i in 0..p {
+                g.data[i + j * p] *= 10f64.powf(-((i + j) as f64) / 4.0);
+            }
+        }
+        cases.push(g);
+        let mut worst = (0.0f64, 0.0f64, 0.0f64); // orthogonality/u, residual/(u‖A‖), vectors
+        let mut mismatched = 0usize;
+        for a in &cases {
+            let p = a.rows;
+            let (d, z) = sym_eig_polished(a, &so).unwrap();
+            let ae = DenseBlock {
+                rows: p,
+                cols: p,
+                data: a.data.iter().map(|&x| ext(x)).collect::<Vec<Ext>>(),
+            };
+            let (dr, zr) = sym_eig(&ae, &SchurOptions::<Ext>::new()).unwrap();
+            let norm2 = dr.iter().fold(0.0f64, |m, v| m.max(v.to_f64().abs()));
+            // Orthogonality and residuals of the output, in dd (Lemma P).
+            for j in 0..p {
+                for i in 0..p {
+                    let mut s = Ext::ZERO;
+                    for t in 0..p {
+                        s += ext(z.data[t + i * p]) * ext(z.data[t + j * p]);
+                    }
+                    if i == j {
+                        s -= Ext::ONE;
+                    }
+                    worst.0 = worst.0.max(s.abs().to_f64() / u);
+                }
+                let mut r2 = Ext::ZERO;
+                for i in 0..p {
+                    let mut r = -(ext(d[j]) * ext(z.data[i + j * p]));
+                    for t in 0..p {
+                        r += ext(a.data[i + t * p]) * ext(z.data[t + j * p]);
+                    }
+                    r2 += r * r;
+                }
+                let res = r2.sqrt().to_f64();
+                let bound = up * (1.0 + up) * (norm2 + 2.0 * d[j].abs()) * (1.0 + 0.1 * u)
+                    + 64.0 * p as f64 * edd * norm2;
+                assert!(
+                    res <= bound,
+                    "p = {p}, column {j}: residual {res:e} > {bound:e}"
+                );
+                worst.1 = worst.1.max(res / (u * norm2.max(f64::MIN_POSITIVE)));
+            }
+            // Pair the values by order (both lists sorted).
+            let mut ord: Vec<usize> = (0..p).collect();
+            ord.sort_by(|&x, &y| d[x].total_cmp(&d[y]));
+            let mut ordr: Vec<usize> = (0..p).collect();
+            ordr.sort_by(|&x, &y| dr[x].partial_cmp(&dr[y]).unwrap());
+            for (&c, &cr) in ord.iter().zip(&ordr) {
+                let lam = dr[cr];
+                // The value: one rounding of the reference.
+                let err = (ext(d[c]) - lam).abs().to_f64();
+                assert!(
+                    err <= up * lam.abs().to_f64() + 64.0 * p as f64 * edd * norm2,
+                    "p = {p}: value {} against {lam:?}",
+                    d[c]
+                );
+                if d[c].to_bits() != lam.to_f64().to_bits() {
+                    mismatched += 1;
+                }
+                // The vector, against the reference's with the sign aligned.
+                let gap = dr
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| i != cr)
+                    .map(|(_, v)| (*v - lam).abs().to_f64())
+                    .fold(f64::INFINITY, f64::min);
+                let mut s = Ext::ZERO;
+                for t in 0..p {
+                    s += ext(z.data[t + c * p]) * zr.data[t + cr * p];
+                }
+                let sign = if s.to_f64() < 0.0 { -1.0 } else { 1.0 };
+                for t in 0..p {
+                    let q = zr.data[t + cr * p] * ext(sign);
+                    let e = (ext(z.data[t + c * p]) - q).abs().to_f64();
+                    let slack = 64.0 * p as f64 * edd * norm2 / gap.max(f64::MIN_POSITIVE);
+                    assert!(
+                        e <= up * q.abs().to_f64() + slack,
+                        "p = {p}, vector {c}, entry {t}: {e:e} (gap {gap:e})"
+                    );
+                    worst.2 = worst.2.max((e - up * q.abs().to_f64()).max(0.0) / slack);
+                }
+            }
+        }
+        eprintln!(
+            "(E1′): max |ẐᵀẐ − I| = {:.2}u, max residual = {:.2}u‖A‖₂, vectors at {:.1e} of the slack, {mismatched} values differ from RN(reference)",
+            worst.0, worst.1, worst.2
+        );
+        assert!(worst.0 <= 2.2, "{}", worst.0);
+        assert_eq!(mismatched, 0);
+        // (C1): the bias of the largest values on restart-like blocks, SJ
+        // alone against SP (task I09: +0.42 u‖A‖ for SJ on the blocks of a run).
+        let (mut b_sj, mut b_sp, mut cnt) = (0.0f64, 0.0f64, 0usize);
+        for _ in 0..100 {
+            let a = arrowhead(24, 12, &mut rng);
+            let ae = DenseBlock {
+                rows: 24,
+                cols: 24,
+                data: a.data.iter().map(|&x| ext(x)).collect::<Vec<Ext>>(),
+            };
+            let (dr, _) = sym_eig(&ae, &SchurOptions::<Ext>::new()).unwrap();
+            let (d1, _) = sym_eig(&a, &so).unwrap();
+            let (d2, _) = sym_eig_polished(&a, &so).unwrap();
+            let s = |d: &[f64]| -> Vec<f64> {
+                let mut v = d.to_vec();
+                v.sort_by(|x, y| y.total_cmp(x));
+                v
+            };
+            let mut r: Vec<Ext> = dr.clone();
+            r.sort_by(|x, y| y.partial_cmp(x).unwrap());
+            let (s1, s2) = (s(&d1), s(&d2));
+            let na = r[0].to_f64().abs();
+            for c in 0..10 {
+                b_sj += (r[c] - ext(s1[c])).to_f64() / (u * na);
+                b_sp += (r[c] - ext(s2[c])).to_f64() / (u * na);
+                cnt += 1;
+            }
+        }
+        let (b_sj, b_sp) = (b_sj / cnt as f64, b_sp / cnt as f64);
+        eprintln!("(C1) mean λ − d over the 10 largest: SJ {b_sj:+.3} u‖A‖, SP {b_sp:+.3} u‖A‖");
+        assert!(b_sp.abs() <= 0.05, "{b_sp}");
+        // SP0: another scalar gets SJ's bits; the zero matrix (0, I).
+        let ae = DenseBlock {
+            rows: 7,
+            cols: 7,
+            data: rand_mat::<f64>(7, 13, true)
+                .data
+                .iter()
+                .map(|&x| ext(x))
+                .collect::<Vec<Ext>>(),
+        };
+        let so_e = SchurOptions::<Ext>::new();
+        let (d1, z1) = sym_eig(&ae, &so_e).unwrap();
+        let (d2, z2) = sym_eig_polished(&ae, &so_e).unwrap();
+        assert!(d1 == d2 && z1.data == z2.data);
+        let (d, z) = sym_eig_polished(&DenseBlock::<f64>::zeros(3, 3), &so).unwrap();
+        assert_eq!((d, z.data), (vec![0.0; 3], identity::<f64>(3).data));
     }
 
     /// SV: the relation `A = R A′ Rᵀ` and the standardized shape, on every branch.
