@@ -281,8 +281,9 @@
 //! and its rounding terms are `O((n + c)u‖A‖)` whatever the number of
 //! restarts: it certifies a returned pair after any run, where (K2) gives
 //! no closed form. The drivers do not compute it (it would change the
-//! number of applications, [`EigsStats::applies`]); how to offer it is
-//! issue xingo-statla#10's open decision.
+//! number of applications, [`EigsStats::applies`]): [`SymEigen::residuals`]
+//! and [`Eigen::residuals`] compute `ρ̂` on request, outside the counters;
+//! `tests/long_runs.rs` asserts the lemma on long runs of both drivers.
 //!
 //! ## Acceptance (L3.4, S9; tests/eigs.rs)
 //! On Matrix Market matrices the `k` wanted eigenvalues agree with
@@ -1417,6 +1418,96 @@ fn gen_result<T: Real>(raw: Raw<T>) -> Eigen<T> {
         vectors_re: vr,
         vectors_im: vi,
         stats: raw.stats,
+    }
+}
+
+/// Lemma R of Chapter 12.6: `ρ̂_c = fl(‖A y_c − θ_c y_c‖₂)` for column `c`
+/// of `(yr, yi)` (`yi` `None` or a zero column for a real value: one
+/// application; two for a complex value).
+fn recomputed<T, O>(
+    op: &mut O,
+    values: &[Complex<T>],
+    yr: &DenseBlock<T>,
+    yi: Option<&DenseBlock<T>>,
+) -> Result<Vec<T>, StatlaError>
+where
+    T: Real,
+    O: LinearOperator<T> + ?Sized,
+{
+    let n = yr.rows;
+    if op.nrows() != n || op.ncols() != n {
+        return Err(invalid(
+            "residuals: the operator does not match the vectors",
+        ));
+    }
+    let mut wr = vec![T::ZERO; n];
+    let mut wi = vec![T::ZERO; n];
+    let mut r = vec![T::ZERO; 2 * n];
+    let mut out = Vec::with_capacity(values.len());
+    for (c, th) in values.iter().enumerate() {
+        let y = &yr.data[c * n..(c + 1) * n];
+        let z = yi.map(|b| &b.data[c * n..(c + 1) * n]);
+        op.apply(y, &mut wr).map_err(op_err)?;
+        check_finite("operator output", &wr)?;
+        let complex = z.is_some_and(|z| z.iter().any(|&v| !is_exact_zero(v)));
+        if complex {
+            let z = z.unwrap_or(&[]);
+            op.apply(z, &mut wi).map_err(op_err)?;
+            check_finite("operator output", &wi)?;
+            for i in 0..n {
+                r[i] = wr[i] - th.re * y[i] + th.im * z[i];
+                r[n + i] = wi[i] - th.re * z[i] - th.im * y[i];
+            }
+            out.push(norm2(&r));
+        } else {
+            for i in 0..n {
+                r[i] = wr[i] - th.re * y[i];
+            }
+            out.push(norm2(&r[..n]));
+        }
+    }
+    Ok(out)
+}
+
+impl<T: Real> SymEigen<T> {
+    /// The residuals `fl(‖A y − θ y‖₂)` of the returned pairs, recomputed
+    /// with one application of `op` per pair (Lemma R of Chapter 12.6:
+    /// a bound on the true residual that does not depend on the number of
+    /// restarts). Not counted in [`SymEigen::stats`].
+    ///
+    /// # Errors
+    /// [`StatlaError::InvalidArgument`] (no vectors, or `op` not of their
+    /// order), [`StatlaError::NonFinite`], [`StatlaError::Operator`].
+    pub fn residuals<O: LinearOperator<T> + ?Sized>(
+        &self,
+        op: &mut O,
+    ) -> Result<Vec<T>, StatlaError> {
+        let Some(v) = &self.vectors else {
+            return Err(invalid("residuals: the eigenvectors were not computed"));
+        };
+        let values: Vec<Complex<T>> = self
+            .values
+            .iter()
+            .map(|&re| Complex { re, im: T::ZERO })
+            .collect();
+        recomputed(op, &values, v, None)
+    }
+}
+
+impl<T: Real> Eigen<T> {
+    /// As [`SymEigen::residuals`], for complex pairs (`‖·‖₂` in `Cⁿ`; two
+    /// applications per complex value).
+    ///
+    /// # Errors
+    /// As [`SymEigen::residuals`].
+    pub fn residuals<O: LinearOperator<T> + ?Sized>(
+        &self,
+        op: &mut O,
+    ) -> Result<Vec<T>, StatlaError> {
+        let Some(v) = &self.vectors_re else {
+            return Err(invalid("residuals: the eigenvectors were not computed"));
+        };
+        recomputed(op, &self.values, v, self.vectors_im.as_ref())
     }
 }
 
