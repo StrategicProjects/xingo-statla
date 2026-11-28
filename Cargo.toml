@@ -79,6 +79,12 @@ dashu-float = { version = "0.6.2", default-features = false, features = ["std"] 
 [[example]]
 name = "accuracy"
 
+# The timings of the README ("Measured time", issue #8): the updates of
+# `Cholesky`/`Qr` and the drivers, median/min/max of 21 calibrated rounds;
+# `cargo run -p xingo-statla --release --example timing`.
+[[example]]
+name = "timing"
+
 # Sliding-window least squares with `Qr::insert_row`/`delete_row` (Chapter
 # 12.3), against refitting from scratch; ends in an `assert!`.
 [[example]]

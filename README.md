@@ -230,9 +230,9 @@ the SVDs): `DenseBlock`, the borrowed column-major view `MatRef`,
 `CscMatrix` and `CsrMatrix` of `xingo-sparse`, a closure through
 `from_fn`/`from_fns`, or your own type. The programs in
 [`examples/`](examples/) are `accuracy` (the measurements behind the
-constants of the updatable factorizations; Markdown tables) and
-`windowed_regression` (2 000 steps of a sliding-window fit, checked
-against refitting from scratch).
+constants of the updatable factorizations; Markdown tables), `timing`
+(the tables of "Measured time" below) and `windowed_regression` (2 000
+steps of a sliding-window fit, checked against refitting from scratch).
 
 ## Guarantees, and what was measured
 
@@ -298,50 +298,84 @@ And of the implementation:
 ## Measured time
 
 On an idle Apple M2 Pro (macOS, mains power, no other build or test
-running, load average 0.9–3.5 from the desktop), release builds of 0.2.0,
-2026-11-27; each cell is the median over 5 runs, with the minimum and
-maximum in parentheses. Nothing here is asserted by a test.
+running, load average 1.5–3.1 from the desktop), release build of the
+workspace at 0.2.0, 2026-11-28, by
+`cargo run --release -p xingo-statla --example timing`, five runs. Each
+run times every call over 21 rounds of about 20 ms (calibrated; a call
+longer than a round is timed once per round), with the setup (a clone of
+the factor or matrix) and the drop outside the clock, and reports the
+median round; each cell is the median of the five runs, with the minimum
+and maximum of the five in parentheses. Nothing here is asserted by a
+test.
 
-The updatable factorizations (µs; each run is the median of 21 calls,
-except the factorizations, timed once per run), from
-`ACCURACY_TIMING=1 cargo run --release --example accuracy`:
+The updatable factorizations (µs per call; the problems of
+`ACCURACY_TIMING` in the example `accuracy`: an SPD matrix of order 200
+with `κ = 10⁶` and a `400 × 200` matrix with `κ = 10³`):
 
-| operation | `f64` | double-double |
-|---|---:|---:|
-| `Cholesky::factor`, `n = 200` | 286 (272–421) | 5 844 (5 767–6 054) |
-| `Cholesky::update` | 33 (32–34) | 469 (465–489) |
-| `Cholesky::downdate` | 44 (43–45) | 747 (743–777) |
-| `Qr::factor`, `400 × 200` | 13 677 (13 400–14 018) | 232 092 (228 188–238 606) |
-| `Qr::insert_row` | 54 (53–59) | 1 275 (1 255–1 310) |
-| `Qr::delete_row` | 222 (219–239) | 4 119 (4 032–4 286) |
-| `Qr::insert_col` (`j = 0`) | 148 (146–159) | 2 936 (2 877–3 063) |
-| `Qr::delete_col` (`j = 0`) | 49 (48–54) | 1 279 (1 246–1 347) |
-| `Qr::rank1_update` | 175 (174–191) | 4 210 (4 126–4 403) |
+| operation | `f64` | double-double | dd / `f64` |
+|---|---:|---:|---:|
+| `Cholesky::factor`, `n = 200` | 246 (245–247) | 5 821 (5 817–5 874) | 23.7 |
+| `Cholesky::update` | 32.6 (32.6–32.8) | 471 (470–474) | 14.4 |
+| `Cholesky::downdate` | 43.5 (43.3–43.7) | 751 (749–756) | 17.3 |
+| `Qr::factor`, `400 × 200` | 13 399 (13 381–13 502) | 230 143 (229 792–231 214) | 17.2 |
+| `Qr::insert_row` | 54.2 (53.5–55.3) | 1 259 (1 256–1 267) | 23.3 |
+| `Qr::delete_row` | 220 (220–222) | 4 048 (4 044–4 076) | 18.4 |
+| `Qr::insert_col` (`j = 0`) | 147 (147–148) | 2 900 (2 895–2 910) | 19.6 |
+| `Qr::delete_col` (`j = 0`) | 49.5 (48.5–50.1) | 1 258 (1 254–1 263) | 25.4 |
+| `Qr::rank1_update` | 175 (175–176) | 4 164 (4 162–4 194) | 23.8 |
 
-The iterative drivers in `f64` (ms per call, one call per run, `k = 6`
-and the default options), from the ARPACK comparison `cargo test --release
---test arpack -- --include-ignored --test-threads=1 --nocapture`:
+The iterative drivers in `f64` (ms per call, `k = 6`, the default
+options; the matrices of `tests/arpack.rs`, the large ones rebuilt and
+checked against their reference checksums; shift-invert at the first shift
+of each reference file):
 
-| matrix | `n` | `eigsh` LA / `eigs` LR | shift-invert (`eigsh_near` / `eigs_near`) | `svds` |
-|---|---:|---:|---:|---:|
-| graded tridiagonal | 200 | 1.6 (1.5–1.7) | 0.7 (0.7–0.7), `σ = 3` | 1.1 (1.1–1.2) |
-| symmetric random | 300 | 2.3 (2.2–2.5) | 2.1 (2.0–2.2), `σ = 0` | 1.6 (1.6–1.6) |
-| 2-D Laplacian `20 × 17` | 340 | 3.9 (3.8–4.4) | 1.4 (1.2–2.1), `σ = 1.05` | 2.6 (2.6–2.6) |
-| convection–diffusion `20 × 20` | 400 | 4.4 (4.3–4.5) | 1.6 (1.6–1.9), `σ = 4` | 3.0 (3.0–3.1) |
-| nonsymmetric random | 200 | 4.3 (4.2–4.6) | 2.7 (2.7–3.1), `σ = 0.25` | 0.9 (0.9–0.9) |
-| 2-D Laplacian `60 × 50` | 3 000 | 84.3 (84.0–87.8) | 16.2 (16.0–17.0), `σ = 1` | 58.7 (58.7–58.8) |
-| graded tridiagonal | 4 000 | 85.2 (84.7–87.6) | 11.5 (11.4–11.8), `σ = 3` | 61.6 (61.3–61.8) |
-| convection–diffusion `60 × 50` | 3 000 | 92.4 (91.6–98.0) | 17.4 (17.2–19.7), `σ = 4` | 58.7 (58.6–59.4) |
+| matrix | `n` | `eigsh` LA / `eigs` LR | shift-invert (`eigsh_near` / `eigs_near`) | `svds` | `rsvd` |
+|---|---:|---:|---:|---:|---:|
+| graded tridiagonal | 200 | 1.55 (1.54–1.55) | 0.659 (0.658–0.664), `σ = 3` | 1.14 (1.13–1.32) | 0.493 (0.492–0.495) |
+| symmetric random | 300 | 2.24 (2.23–2.25) | 1.96 (1.95–2.02), `σ = 0` | 1.57 (1.57–1.58) | 0.767 (0.764–0.771) |
+| 2-D Laplacian `20 × 17` | 340 | 3.80 (3.79–3.82) | 1.05 (1.05–1.06), `σ = 1.05` | 2.56 (2.55–2.57) | 0.848 (0.842–0.853) |
+| convection–diffusion `20 × 20` | 400 | 4.31 (4.27–4.33) | 1.48 (1.48–1.49), `σ = 4` | 3.04 (3.03–3.05) | 0.990 (0.989–0.997) |
+| nonsymmetric random | 200 | 4.23 (4.23–4.29) | 2.62 (2.61–2.71), `σ = 0.25` | 0.917 (0.915–0.930) | 0.518 (0.516–0.520) |
+| rectangular random `300 × 200` | 200 | — | — | 1.09 (1.08–1.10) | 0.602 (0.601–0.604) |
+| 2-D Laplacian `60 × 50` | 3 000 | 84.4 (84.3–84.8) | 16.0 (15.9–16.5), `σ = 1` | 59.0 (58.6–59.4) | 7.34 (7.26–7.36) |
+| graded tridiagonal | 4 000 | 85.1 (84.4–85.6) | 11.4 (11.3–11.5), `σ = 3` | 61.6 (61.2–62.0) | 9.49 (9.40–9.54) |
+| convection–diffusion `60 × 50` | 3 000 | 92.0 (91.5–92.5) | 16.8 (16.8–17.2), `σ = 4` | 59.0 (58.5–59.3) | 7.31 (7.25–7.37) |
 
-The other `which` of the same matrices are in the same range (`SI` of
-the `20 × 20` convection–diffusion, 142 restarts, takes 32 ms). On a
+`rsvd` (`p = 10`, `q = 2`) asks for the same `k` as `svds` and is 6–8
+times faster on these matrices, but it is a randomized approximation
+whose accuracy depends on the decay of the spectrum (Chapter 12.4), while
+`svds` converges to the tolerance: the columns are not the same service.
+
+The drivers in double-double against `f64` on the same matrix (ms per
+call; the problems of the double-double smoke tests of `tests/arpack.rs`,
+`tests/rsvd.rs` and `tests/svds.rs`):
+
+| call | `f64` | double-double | dd / `f64` |
+|---|---:|---:|---:|
+| `eigsh` LA, `k = 4`, graded tridiagonal `n = 200` | 1.41 (1.40–1.67) | 52.1 (52.0–52.5) | 37.0 |
+| `eigsh_near` `σ = 3`, `k = 3`, the same | 0.539 (0.538–0.542) | 10.5 (10.4–10.5) | 19.4 |
+| `eigs` LM, `k = 4`, nonsymmetric random `n = 200` | 5.62 (5.58–5.70) | 170 (169–170) | 30.3 |
+| `eigs_near` `σ = 0.25`, `k = 4`, the same | 1.89 (1.85–1.91) | 22.6 (22.6–22.7) | 12.0 |
+| `rsvd`, `k = 5`, rank-5 dense `40 × 30` | 0.083 (0.083–0.085) | 2.26 (2.26–2.28) | 27.3 |
+| `svds`, `k = 5`, dense `90 × 60`, `σ` geometric `1 … 1e-20` | 0.124 (0.124–0.125) | 3.95 (3.95–3.98) | 31.9 |
+
+The five runs agree within 4 % in 62 of the 64 cells; the other two are
+`f64` calls on the graded tridiagonal of order 200 (`svds`, `eigsh` with
+`k = 4`), 17–19 % slower in one run, every round of that run alike (not
+investigated). Inside a run the 21 rounds spread by at most 13 %. These
+replace the numbers of 2026-11-27, taken by the accuracy and ARPACK
+harnesses with a single call per run (a cold one for the factorizations
+and the drivers): they agree within 4 %, except the shift-invert calls on
+the matrices of order 200–400 (3–8 % lower now, 25 % on the `20 × 17`
+Laplacian: 1.05 against 1.4 ms) and `Cholesky::factor` in `f64` (14 %
+lower: 246 against 286 µs), where the first call of a run paid for what
+the warm-up now absorbs. On a
 shared Xeon E5-2699 v4 (x86_64 Linux, load average 1.9–2.8 from other
-users) the same runs took 1.6–15 times longer, and two runs of the same
-call differed by up to 65 % on the matrices of order 3 000–4 000 (more on
-the small ones), so these are orders of magnitude only: `Cholesky::update` 54 µs, `Qr::insert_row` 792 µs in
-`f64`; `eigsh` LA on the `60 × 50` Laplacian 202 ms, `svds` 159 ms.
-`rsvd` is not timed yet
-([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
+users) the harnesses of 2026-11-27 took 1.6–15 times longer, and two runs
+of the same call differed by up to 65 % on the matrices of order 3 000–4 000,
+so these are orders of magnitude only: `Cholesky::update` 54 µs,
+`Qr::insert_row` 792 µs in `f64`; `eigsh` LA on the `60 × 50` Laplacian
+202 ms, `svds` 159 ms. The `timing` example has not been run there.
 
 ## Features
 
@@ -445,10 +479,10 @@ closed have an issue.
    LAPACK sources, but the subsection and theorem numbers *inside the
    books* (Golub & Van Loan, Higham, Parlett, Björck) could not be checked
    and are marked so in the chapters.
-7. **Timings:** measured on one idle machine (Apple M2 Pro) and one
-   shared x86_64 (see "Measured time"), by the existing harnesses rather
-   than a dedicated benchmark; `rsvd` and the double-double eigensolvers
-   are not timed ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
+7. **Timings:** measured by the example `timing` on one idle machine
+   (Apple M2 Pro), and only as orders of magnitude, by the older harnesses,
+   on one shared x86_64 (see "Measured time"); nothing in the test suite
+   checks a time.
 
 ## Design notes
 

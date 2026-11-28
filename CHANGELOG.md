@@ -7,16 +7,24 @@ version may change the public API.
 
 ## [Unreleased]
 
+### Added
+
+* Example `timing` (issue
+  [#8](https://github.com/StrategicProjects/xingo-statla/issues/8)): the
+  updates of `Cholesky` and `Qr` in `f64` and double-double, `eigsh`,
+  `eigs`, `eigsh_near`, `eigs_near`, `svds` and `rsvd` in `f64` on the
+  fixtures of the tests, and the same drivers in double-double next to
+  their `f64` runs; every call is timed over 21 calibrated rounds with its
+  setup outside the clock (median, minimum, maximum), with the load
+  average in the header. No change to the library.
+
 ### Documentation
 
-* README section "Measured time" and a note on the page (issue
-  [#8](https://github.com/StrategicProjects/xingo-statla/issues/8)): the
-  updatable factorizations in `f64` and double-double and the iterative
-  drivers in `f64` (`eigsh`, `eigs`, shift-invert, `svds`) timed on an
-  idle Apple M2 Pro, 5 runs each, by the existing harnesses (`accuracy`
-  with `ACCURACY_TIMING`, `tests/arpack.rs`), and on a shared Xeon
-  E5-2699 v4 as orders of magnitude. `rsvd` is not timed yet, so #8
-  stays open. No code changes.
+* README section "Measured time", the note on the page and limitation 7
+  (issue [#8](https://github.com/StrategicProjects/xingo-statla/issues/8)):
+  the tables are now the output of `timing` on an idle Apple M2 Pro, five
+  runs, `rsvd` and the double-double drivers included; a shared Xeon
+  E5-2699 v4 is kept as orders of magnitude, from the older harnesses.
 
 ## [0.2.0] — 2026-11-27
 
