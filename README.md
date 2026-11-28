@@ -295,6 +295,54 @@ And of the implementation:
   changing them is a breaking change.
 * **No `unsafe`** (`#![forbid(unsafe_code)]`) and no C.
 
+## Measured time
+
+On an idle Apple M2 Pro (macOS, mains power, no other build or test
+running, load average 0.9–3.5 from the desktop), release builds of 0.2.0,
+2026-11-27; each cell is the median over 5 runs, with the minimum and
+maximum in parentheses. Nothing here is asserted by a test.
+
+The updatable factorizations (µs; each run is the median of 21 calls,
+except the factorizations, timed once per run), from
+`ACCURACY_TIMING=1 cargo run --release --example accuracy`:
+
+| operation | `f64` | double-double |
+|---|---:|---:|
+| `Cholesky::factor`, `n = 200` | 286 (272–421) | 5 844 (5 767–6 054) |
+| `Cholesky::update` | 33 (32–34) | 469 (465–489) |
+| `Cholesky::downdate` | 44 (43–45) | 747 (743–777) |
+| `Qr::factor`, `400 × 200` | 13 677 (13 400–14 018) | 232 092 (228 188–238 606) |
+| `Qr::insert_row` | 54 (53–59) | 1 275 (1 255–1 310) |
+| `Qr::delete_row` | 222 (219–239) | 4 119 (4 032–4 286) |
+| `Qr::insert_col` (`j = 0`) | 148 (146–159) | 2 936 (2 877–3 063) |
+| `Qr::delete_col` (`j = 0`) | 49 (48–54) | 1 279 (1 246–1 347) |
+| `Qr::rank1_update` | 175 (174–191) | 4 210 (4 126–4 403) |
+
+The iterative drivers in `f64` (ms per call, one call per run, `k = 6`
+and the default options), from the ARPACK comparison `cargo test --release
+--test arpack -- --include-ignored --test-threads=1 --nocapture`:
+
+| matrix | `n` | `eigsh` LA / `eigs` LR | shift-invert (`eigsh_near` / `eigs_near`) | `svds` |
+|---|---:|---:|---:|---:|
+| graded tridiagonal | 200 | 1.6 (1.5–1.7) | 0.7 (0.7–0.7), `σ = 3` | 1.1 (1.1–1.2) |
+| symmetric random | 300 | 2.3 (2.2–2.5) | 2.1 (2.0–2.2), `σ = 0` | 1.6 (1.6–1.6) |
+| 2-D Laplacian `20 × 17` | 340 | 3.9 (3.8–4.4) | 1.4 (1.2–2.1), `σ = 1.05` | 2.6 (2.6–2.6) |
+| convection–diffusion `20 × 20` | 400 | 4.4 (4.3–4.5) | 1.6 (1.6–1.9), `σ = 4` | 3.0 (3.0–3.1) |
+| nonsymmetric random | 200 | 4.3 (4.2–4.6) | 2.7 (2.7–3.1), `σ = 0.25` | 0.9 (0.9–0.9) |
+| 2-D Laplacian `60 × 50` | 3 000 | 84.3 (84.0–87.8) | 16.2 (16.0–17.0), `σ = 1` | 58.7 (58.7–58.8) |
+| graded tridiagonal | 4 000 | 85.2 (84.7–87.6) | 11.5 (11.4–11.8), `σ = 3` | 61.6 (61.3–61.8) |
+| convection–diffusion `60 × 50` | 3 000 | 92.4 (91.6–98.0) | 17.4 (17.2–19.7), `σ = 4` | 58.7 (58.6–59.4) |
+
+The other `which` of the same matrices are in the same range (`SI` of
+the `20 × 20` convection–diffusion, 142 restarts, takes 32 ms). On a
+shared Xeon E5-2699 v4 (x86_64 Linux, load average 1.9–2.8 from other
+users) the same runs took 1.6–15 times longer, and two runs of the same
+call differed by up to 65 % on the matrices of order 3 000–4 000 (more on
+the small ones), so these are orders of magnitude only: `Cholesky::update` 54 µs, `Qr::insert_row` 792 µs in
+`f64`; `eigsh` LA on the `60 × 50` Laplacian 202 ms, `svds` 159 ms.
+`rsvd` is not timed yet
+([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
+
 ## Features
 
 * `faer` (off) — enables the feature of the same name of `xingo-sparse`,
@@ -397,7 +445,10 @@ closed have an issue.
    LAPACK sources, but the subsection and theorem numbers *inside the
    books* (Golub & Van Loan, Higham, Parlett, Björck) could not be checked
    and are marked so in the chapters.
-7. **No timing is claimed:** nothing was timed on an idle machine ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
+7. **Timings:** measured on one idle machine (Apple M2 Pro) and one
+   shared x86_64 (see "Measured time"), by the existing harnesses rather
+   than a dedicated benchmark; `rsvd` and the double-double eigensolvers
+   are not timed ([#8](https://github.com/StrategicProjects/xingo-statla/issues/8)).
 
 ## Design notes
 

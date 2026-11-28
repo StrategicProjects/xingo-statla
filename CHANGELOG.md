@@ -5,6 +5,19 @@ All notable changes to `xingo-statla` are recorded here. The format follows
 follows [Semantic Versioning](https://semver.org/); before 1.0, a minor
 version may change the public API.
 
+## [Unreleased]
+
+### Documentation
+
+* README section "Measured time" and a note on the page (issue
+  [#8](https://github.com/StrategicProjects/xingo-statla/issues/8)): the
+  updatable factorizations in `f64` and double-double and the iterative
+  drivers in `f64` (`eigsh`, `eigs`, shift-invert, `svds`) timed on an
+  idle Apple M2 Pro, 5 runs each, by the existing harnesses (`accuracy`
+  with `ACCURACY_TIMING`, `tests/arpack.rs`), and on a shared Xeon
+  E5-2699 v4 as orders of magnitude. `rsvd` is not timed yet, so #8
+  stays open. No code changes.
+
 ## [0.2.0] — 2026-11-27
 
 `xingo-sparse` 0.6 (whose types are in this crate's public API: hence a
